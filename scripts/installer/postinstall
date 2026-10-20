@@ -1,0 +1,71 @@
+#!/bin/sh
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+binary='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/MacOS/OpenConnect-GUI-KillSwitch'
+support='/Library/Application Support/OpenConnect-GUI-KillSwitch'
+daemon='/Library/LaunchDaemons/net.openconnect-vpn.killswitch.service.plist'
+desktop_uid=$(/usr/bin/stat -f '%u' /dev/console)
+if [ "$desktop_uid" -lt 500 ]; then
+    printf '%s\n' 'Install from the logged-in macOS desktop account.' >&2
+    exit 1
+fi
+desktop_user=$(/usr/bin/id -nu "$desktop_uid")
+desktop_home=$(/usr/bin/dscl . -read "/Users/$desktop_user" NFSHomeDirectory | /usr/bin/cut -d ' ' -f 2-)
+agent_dir="$desktop_home/Library/LaunchAgents"
+agent="$agent_dir/net.openconnect-vpn.killswitch.gui.plist"
+if [ -L "$desktop_home/Library" ] || [ -L "$agent_dir" ] || [ -L "$agent" ]; then
+    printf '%s\n' 'Unsafe LaunchAgents path.' >&2; exit 1
+fi
+# Verify the exact runtime at launchd's path before invoking any privileged
+# diagnostic. A relocated v6 must never cause us to execute the old v5 helper.
+runtime_info='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/Info.plist'
+runtime_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runtime_info")
+runtime_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$runtime_info")
+expected_version=$(/bin/cat "$support/VERSION")
+if [ "$runtime_id" != net.openconnect-vpn.gui.killswitch.boot ] || [ "$runtime_version" != "$expected_version" ]; then
+    printf '%s\n' 'Wrong helper at the fixed service path; installation cannot continue.' >&2
+    exit 1
+fi
+"$binary" --check-tun
+"$binary" --check-storage
+"$binary" --check-pf-abi
+"$binary" --prepare-boot
+
+# Root-owned identity policy; VPN endpoints come from the user's profiles.
+/usr/bin/printf '{"schema":2,"uid":%s}\n' "$desktop_uid" > "$support/service.json"
+/bin/chmod 600 "$support/service.json"
+/usr/sbin/chown root:wheel "$support/service.json"
+
+# v5 ran the GUI as root. Move only this application's preferences, without
+# printing credentials. Newer profile values take precedence.
+"$binary" --migrate-preferences "$desktop_uid"
+
+/bin/rm -f /Library/LaunchDaemons/net.openconnect-vpn.killswitch.boot.plist
+"$binary" --boot-guard
+/bin/launchctl bootstrap system "$daemon"
+ready=false
+for attempt in 1 2 3 4 5 6 7 8; do
+    if "$binary" --service-status; then ready=true; break; fi
+done
+if [ "$ready" != true ]; then
+    printf '%s\n' 'Network service did not confirm its firewall state.' >&2
+    # Root service startup errors contain no VPN credentials. Include its latest
+    # diagnostic in Installer's log instead of hiding the actual failing step.
+    /usr/bin/tail -n 12 /var/log/openconnect-network-service-error.log >&2 || :
+    exit 1
+fi
+# Remove only the misplaced code-only runtime left by a failed early v6 update.
+# The new fixed-path runtime has already passed diagnostics and readiness.
+misplaced='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.localized'
+if [ -d "$misplaced" ] && [ ! -L "$misplaced" ]; then
+    misplaced_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$misplaced/Runtime.app/Contents/Info.plist" 2>/dev/null || :)
+    if [ "$misplaced_id" = net.openconnect-vpn.gui.killswitch.service ]; then
+        /bin/rm -rf -- "$misplaced"
+    fi
+fi
+if [ ! -d "$agent_dir" ]; then /usr/bin/install -d -m 755 -o "$desktop_uid" "$agent_dir"; fi
+/usr/bin/install -m 644 -o "$desktop_uid" "$support/net.openconnect-vpn.killswitch.gui.plist" "$agent"
+/bin/launchctl bootout "gui/$desktop_uid/net.openconnect-vpn.killswitch.gui" 2>/dev/null || :
+/bin/launchctl bootstrap "gui/$desktop_uid" "$agent"
+printf '%s\n' 'PASS: root network service verified; GUI runs as desktop user; VPN password is entered locally.'

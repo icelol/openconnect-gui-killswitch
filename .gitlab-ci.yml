@@ -1,0 +1,27 @@
+stages:
+  - validate
+  - build
+
+source-validation:
+  stage: validate
+  image: python:3.12-slim
+  script:
+    - python3 scripts/validate-release.py
+
+# Requires an Apple Silicon shell runner with Xcode CLT and build dependencies.
+# Building never installs the app or changes the live firewall.
+macos-arm64-package:
+  stage: build
+  tags: [macos-arm64]
+  when: manual
+  allow_failure: true
+  variables:
+    HOMEBREW_NO_AUTO_UPDATE: "1"
+  script:
+    - ./scripts/build-macos.sh
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - dist/*.pkg
+      - dist/*.dmg
+      - dist/*.sha256

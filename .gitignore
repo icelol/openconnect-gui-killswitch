@@ -1,0 +1,24 @@
+# temporary files
+*.sw[op]
+*~
+
+# project files
+/*.pro.user
+/CMakeLists.txt.user
+
+# temporary build folders
+build-release*/
+build*/
+
+
+# temporary...
+_xxx/
+*.zip
+*.exe
+*.exe.sha512
+
+# Local application artifacts; no runtime settings or credentials belong here.
+dist/
+__pycache__/
+*.pyc
+.DS_Store
