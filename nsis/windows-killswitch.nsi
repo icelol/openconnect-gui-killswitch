@@ -51,6 +51,23 @@ Section "OpenConnect and system protection" Main
     SetErrorLevel 1
     Abort
   ${EndIf}
+  ; Remove inherited per-machine writer grants from Program Files. Only SYSTEM
+  ; and Administrators may change the runtime; desktop users retain read/execute.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /reset'
+  Pop $0
+  ${If} $0 == 0
+    nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"'
+    Pop $0
+  ${EndIf}
+  ${If} $0 == 0
+    nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR\*" /reset /T /C'
+    Pop $0
+  ${EndIf}
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP "Cannot protect access to the installed runtime." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\openconnect-gui.exe" --install-service'
   Pop $0
   Pop $2
