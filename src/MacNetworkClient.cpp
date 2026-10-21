@@ -98,18 +98,56 @@ void MacNetworkClient::read()
     }
 }
 
-int queryNetworkServiceStatus(int argc, char** argv)
+int queryNetworkServiceStatus(int argc, char** argv, bool requireVerified)
 {
     QCoreApplication app(argc, argv);
     MacNetworkClient client;
-    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&app](const QJsonObject& state) {
+    bool reported = false;
+    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+        if (reported) return;
+        reported = true;
         const auto bytes = QJsonDocument(state).toJson(QJsonDocument::Compact);
         std::printf("%s\n", bytes.constData());
         const auto firewall = state.value("firewall").toObject();
-        app.exit(state.value("schema").toInt() == 1 && firewall.value("verified").toBool()
-            && !firewall.value("busy").toBool() ? 0 : 1);
+        const bool ready = state.value("schema").toInt() == 1;
+        app.exit(ready && (requireVerified
+            ? firewall.value("verified").toBool() && !firewall.value("busy").toBool()
+            : state.value("capabilities").toObject().value("explicitOff").toBool()) ? 0 : 1);
     });
     QTimer::singleShot(1500, &app, [&app] { app.exit(1); });
+    client.start();
+    return app.exec();
+}
+
+int disableNetworkServiceProtection(int argc, char** argv)
+{
+    QCoreApplication app(argc, argv);
+    MacNetworkClient client;
+    bool sent = false, accepted = false;
+    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+        if (!sent) {
+            sent = true;
+            // OFF has no dependency on the selected profile, DNS, or VPN login.
+            client.request("firewall", {{"enabled", false}}, [&](const QJsonObject&, const QString& error) {
+                if (!error.isEmpty()) {
+                    std::fprintf(stderr, "OFF request failed: %s\n", qPrintable(error));
+                    app.exit(1);
+                } else accepted = true;
+            });
+            return;
+        }
+        const auto firewall = state.value("firewall").toObject();
+        if (accepted && state.value("schema").toInt() == 1
+            && !firewall.value("busy").toBool() && !firewall.value("requested").toBool()
+            && !firewall.value("armed").toBool() && firewall.value("verified").toBool()) {
+            std::printf("PASS: OpenConnect blocking is OFF. Other applications' PF rules were retained.\n");
+            app.exit(0);
+        }
+    });
+    QTimer::singleShot(30000, &app, [&app] {
+        std::fprintf(stderr, "OFF was not confirmed. Use Recover Kill Switch.command for administrator recovery.\n");
+        app.exit(1);
+    });
     client.start();
     return app.exec();
 }

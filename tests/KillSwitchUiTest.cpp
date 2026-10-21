@@ -20,6 +20,7 @@
 namespace {
 struct Firewall {
     QString installed;
+    QString root = "anchor \"com.apple/*\" all";
     bool enabled = false;
     MacKillSwitch::Result operator()(const QStringList& args, const QByteArray& data)
     {
@@ -32,7 +33,7 @@ struct Firewall {
             p.waitForFinished();
             return {p.exitCode(), QString::fromUtf8(p.readAllStandardOutput()), QString::fromUtf8(p.readAllStandardError())};
         }
-        if (args == QStringList{"-sr"}) return {0, "anchor \"com.apple/*\" all", {}};
+        if (args == QStringList{"-sr"}) return {0, root, {}};
         if (args == QStringList{"-a", "com.apple", "-s", "Anchors"}) return {0, {}, {}};
         if (args == QStringList{"-v", "-s", "Interfaces"}) return {0, "lo0 (skip)\nen0", {}};
         if (args == QStringList{"-s", "info"}) return {0, enabled ? "Status: Enabled" : "Status: Disabled", {}};
@@ -323,6 +324,74 @@ private slots:
             QTRY_VERIFY(replied);
             QVERIFY(guard.isArmed());
         }
+    }
+
+    void recoveryFailureKeepsOffControlAvailableAndIgnoresInvalidProfile()
+    {
+        QTemporaryDir directory; Firewall pf; QString error;
+        const auto state = directory.filePath("state.json"), boot = directory.filePath("boot.json");
+        {
+            MacKillSwitch previous(std::ref(pf), state, boot);
+            QVERIFY(previous.arm(QUrl("https://203.0.113.10"), error));
+        }
+        // Another app changes PF while this client's protection was persisted ON.
+        pf.root += "\npass quick all";
+        MacKillSwitch guard(std::ref(pf), state, boot);
+        QVERIFY(!guard.restoreBootProtection(error));
+        QVERIFY(!error.isEmpty());
+        const auto recoveryError = error;
+        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        QVERIFY2(service.start(error, recoveryError), qPrintable(error));
+        service.m_monitor.stop();
+        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client);
+        window.show();
+        QTRY_VERIFY(client->available());
+        QTRY_VERIFY(!service.status().value("firewall").toObject().value("verified").toBool());
+        window.findChild<QComboBox*>("serverList")->setCurrentText("http://invalid-for-connect");
+        auto off = window.findChild<QPushButton*>("killSwitchOffButton");
+        QVERIFY(off && off->isEnabled());
+        off->click();
+        QTRY_VERIFY(!guard.isArmed());
+        QTRY_VERIFY(service.status().value("firewall").toObject().value("verified").toBool());
+        QVERIFY(pf.installed.isEmpty());
+        QVERIFY(service.status().value("firewall").toObject().value("error").toString().isEmpty());
+        bool enabled = true; MacKillSwitch::Policy policy;
+        QVERIFY(MacKillSwitch::readBootPolicy(boot, policy, enabled, error));
+        QVERIFY(!enabled);
+        // Recovery did not replace the other application's root policy.
+        QVERIFY(pf.root.endsWith("pass quick all"));
+    }
+
+    void explicitOffWorksWithUncheckedToggleAfterFailedRecovery()
+    {
+        QTemporaryDir directory; Firewall pf; QString error;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        QVERIFY(service.start(error, "Injected recovery failure"));
+        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client);
+        window.show(); QTRY_VERIFY(client->available());
+        QTRY_VERIFY(!window.findChild<QCheckBox*>("killSwitchCheckBox")->isChecked());
+        window.findChild<QPushButton*>("killSwitchOffButton")->click();
+        QTRY_VERIFY(service.status().value("firewall").toObject().value("verified").toBool());
+        QVERIFY(!guard.isArmed());
+        QVERIFY(service.status().value("firewall").toObject().value("error").toString().isEmpty());
+    }
+
+    void monitorDoesNotHideAStartupRecoveryFailure()
+    {
+        QTemporaryDir directory; Firewall pf; QString error;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
+        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        QVERIFY(service.start(error, "Injected startup recovery failure"));
+        QVERIFY(service.m_recoveryRequired);
+        QVERIFY(QMetaObject::invokeMethod(&service.m_monitor, "timeout", Qt::DirectConnection));
+        QVERIFY(!service.m_verification.isRunning());
+        const auto state = service.status().value("firewall").toObject();
+        QVERIFY(!state.value("verified").toBool());
+        QVERIFY(!state.value("error").toString().isEmpty());
     }
 
     void malformedOrOversizedIpcMessagesCannotChangeFirewall()

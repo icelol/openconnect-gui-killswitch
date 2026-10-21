@@ -71,6 +71,21 @@ The DMG also contains `Clean OpenConnect.command` and
 `Recover Kill Switch.command`. Recovery removes this client's blocking rules and
 restarts its service with the switch off, preserving application profiles.
 
+The **«Снять блокировку OpenConnect»** button explicitly requests OFF, including
+after a failed enable/restore and when the switch is already unchecked. A firewall
+restore error leaves the service controls available and is shown in the GUI; it
+does not cause a restart loop that prevents OFF. Ordinary OFF removes this client's
+rules and releases its PF reference. PF may remain enabled for other applications.
+
+Installed-client command without an administrator prompt:
+
+```sh
+/Applications/OpenConnect-GUI-KillSwitch.app/Contents/MacOS/OpenConnect-GUI-KillSwitch --service-disable
+```
+
+Success is reported only after the service confirms OFF. If the service is
+unavailable, use the recovery launcher and confirm the local administrator prompt.
+
 From a source checkout:
 
 ```sh

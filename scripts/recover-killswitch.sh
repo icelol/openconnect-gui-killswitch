@@ -5,7 +5,16 @@ export PATH
 LC_ALL=C
 export LC_ALL
 
+binary='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/MacOS/OpenConnect-GUI-KillSwitch'
 if [ "$(id -u)" != 0 ]; then
+    # The authenticated root service can perform ordinary OFF without sudo.
+    # Older/unavailable services fall back to the explicit administrator repair.
+    if [ -x "$binary" ]; then
+        capabilities=$("$binary" --service-status 2>/dev/null || :)
+        case "$capabilities" in
+            *'"explicitOff":true'*) if "$binary" --service-disable; then exit 0; fi ;;
+        esac
+    fi
     exec /usr/bin/sudo /bin/sh "$0" "$@"
 fi
 
@@ -13,7 +22,6 @@ anchor='com.apple/000.openconnect-gui-killswitch'
 state='/var/run/openconnect-gui-killswitch/state.json'
 boot='/Library/Application Support/OpenConnect-GUI-KillSwitch/boot.json'
 daemon='/Library/LaunchDaemons/net.openconnect-vpn.killswitch.service.plist'
-binary='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/MacOS/OpenConnect-GUI-KillSwitch'
 
 # Stop this client's in-flight workers before clearing its persistent rules.
 # No Cisco/other VPN process is matched.

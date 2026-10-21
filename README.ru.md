@@ -1,5 +1,21 @@
 # OpenConnect GUI + Kill Switch
 
+В версии **1.1.1** есть отдельная кнопка **«Снять блокировку OpenConnect»**.
+Она отправляет OFF даже после ошибки включения/восстановления или при уже
+выключенном переключателе. Ошибка восстановления PF больше не останавливает
+службу и не лишает возможности выключения. Программа снимает свои правила;
+PF может оставаться включённым для других приложений.
+
+Без запроса пароля администратора, через установленную службу:
+
+```sh
+/Applications/OpenConnect-GUI-KillSwitch.app/Contents/MacOS/OpenConnect-GUI-KillSwitch --service-disable
+```
+
+Успех выводится после подтверждения OFF службой. Если служба недоступна,
+используйте `Recover Kill Switch.command` из DMG с локальным подтверждением
+пароля администратора.
+
 **Клиент OpenConnect для macOS с системным kill switch, независимым от Connect и Disconnect.**
 
 [English](README.md) · [Релизы](https://github.com/icelol/openconnect-gui-killswitch/releases) · [Архитектура](docs/macos-killswitch.md)

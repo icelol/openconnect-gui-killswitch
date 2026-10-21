@@ -173,7 +173,7 @@ MacNetworkService::MacNetworkService(MacKillSwitch* guard, uint allowedUid, cons
     connect(&m_server, &QLocalServer::newConnection, this, &MacNetworkService::accept);
     connect(&m_monitor, &QTimer::timeout, this, [this] {
         if (m_session && m_vpnState == "connected") m_session->requestStats();
-        if (m_busy || m_verification.isRunning() || !m_guard->isArmed()) return;
+        if (m_busy || m_recoveryRequired || m_verification.isRunning() || !m_guard->isArmed()) return;
         auto watcher = new QFutureWatcher<QString>(this);
         connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher] {
             const auto error = watcher->result(); watcher->deleteLater();
@@ -222,7 +222,7 @@ bool MacNetworkService::supportedProtocol(const QString& protocol)
     return found;
 }
 
-bool MacNetworkService::start(QString& error)
+bool MacNetworkService::start(QString& error, const QString& recoveryError)
 {
     const auto parent = QFileInfo(m_socketPath).absolutePath();
     struct stat directory{};
@@ -246,8 +246,11 @@ bool MacNetworkService::start(QString& error)
     if (::chmod(path.constData(), 0600) != 0 || ::chown(path.constData(), m_allowedUid, -1) != 0) {
         error = "Cannot protect network service socket"; m_server.close(); return false;
     }
-    m_verified = m_guard->verify(error);
-    if (!m_verified) m_error = error;
+    // Recovery failures must never remove the control path needed to turn OFF.
+    // Keep the failure visible; accepting IPC does not claim a working firewall.
+    m_recoveryRequired = !recoveryError.isEmpty();
+    m_verified = !m_recoveryRequired && m_guard->verify(error);
+    if (!m_verified) m_error = recoveryError.isEmpty() ? error : recoveryError;
     m_monitor.start(3000);
     return true;
 }
@@ -256,9 +259,10 @@ QJsonObject MacNetworkService::status() const
 {
     auto vpn = m_vpnDetails;
     vpn.insert("state", m_vpnState);
-    return {{"schema", 1}, {"revision", QString::number(m_revision)},
+    return {{"schema", 1}, {"capabilities", QJsonObject{{"explicitOff", true}}}, {"revision", QString::number(m_revision)},
         {"firewall", QJsonObject{{"requested", m_desired}, {"armed", m_guard->isArmed()},
-            {"verified", m_verified}, {"busy", m_busy}, {"tunnel", m_guard->hasTunnel()}, {"error", m_error}}},
+            {"verified", m_verified}, {"busy", m_busy}, {"recoveryRequired", m_recoveryRequired},
+            {"tunnel", m_guard->hasTunnel()}, {"error", m_error}}},
         {"vpn", vpn}};
 }
 
@@ -333,6 +337,7 @@ void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& reques
         }
         m_desired = params.value("enabled").toBool(); m_gateway = gateway; ++m_generation;
         m_guard->requestEnabled(m_desired); // OFF intent never waits for DNS/auth.
+        std::fprintf(stderr, "Firewall request: enabled=%d\n", int(m_desired));
         reply(socket, id, {{"accepted", true}});
         changeFirewall(); return;
     }
@@ -379,7 +384,10 @@ void MacNetworkService::changeFirewall()
         m_error = watcher->result(); watcher->deleteLater(); m_busy = false;
         if (generation != m_generation) { changeFirewall(); return; }
         m_verified = m_error.isEmpty();
+        m_recoveryRequired = !m_error.isEmpty();
         if (!m_error.isEmpty()) { m_desired = m_guard->isArmed(); m_guard->requestEnabled(m_desired); }
+        std::fprintf(stderr, "Firewall result: requested=%d armed=%d verified=%d\n",
+            int(m_desired), int(m_guard->isArmed()), int(m_verified));
         broadcast();
         if (!m_pendingProfile.isEmpty()) startVpn();
     });
@@ -452,10 +460,10 @@ int runNetworkService(int argc, char** argv)
     QString error;
     // A restarted service owns no old VPN worker. Remove any stale/reused utun
     // exception before accepting commands, while preserving explicit OFF.
-    if (!guard.restoreBootProtection(error) || !guard.lockTunnel(error)) {
-        std::fprintf(stderr, "Cannot restore firewall: %s\n", qPrintable(error)); return 1;
-    }
+    QString recoveryError;
+    if (!guard.restoreBootProtection(recoveryError) || !guard.lockTunnel(recoveryError))
+        std::fprintf(stderr, "Cannot restore firewall; control remains available for OFF: %s\n", qPrintable(recoveryError));
     MacNetworkService service(&guard, uint(uid), networkServiceSocket());
-    if (!service.start(error)) { std::fprintf(stderr, "%s\n", qPrintable(error)); return 1; }
+    if (!service.start(error, recoveryError)) { std::fprintf(stderr, "%s\n", qPrintable(error)); return 1; }
     return app.exec();
 }

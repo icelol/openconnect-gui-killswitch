@@ -30,6 +30,13 @@ An explicit switch-off removes only this application's rules and releases its
 own saved PF enable reference. Disconnect, connection failure, closing the GUI and
 service restarts preserve an enabled protection policy.
 
+An unsuccessful restoration keeps the authenticated control socket available
+with an unverified/error status. It must never cause a launchd restart loop that
+prevents OFF. The GUI has a separate explicit OFF button, usable with an unchecked
+toggle or invalid/absent profile. `--service-disable` waits for the confirmed OFF
+snapshot; `--service-ready` checks authenticated control availability separately
+from the stricter `--service-status` firewall-health check.
+
 Connect is a separate operation. A queued or repeated click must not create an
 additional session. A profile may use any validated gateway and any protocol
 available in the shipped libOpenConnect. Changing gateways atomically replaces

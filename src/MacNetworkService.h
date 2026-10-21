@@ -55,7 +55,7 @@ public:
     MacNetworkService(MacKillSwitch* guard, uint allowedUid, const QString& socket,
         const QString& initialGateway = {}, QObject* parent = nullptr);
     ~MacNetworkService() override;
-    bool start(QString& error);
+    bool start(QString& error, const QString& recoveryError = {});
     QJsonObject status() const;
     static bool validGateway(const QString& candidate, QString& error);
     static bool supportedProtocol(const QString& protocol);
@@ -80,7 +80,7 @@ private:
     QJsonObject m_pendingProfile, m_vpnDetails;
     ServiceVpnSession* m_session = nullptr;
     QString m_vpnState = "disconnected", m_error, m_gateway;
-    bool m_desired = false, m_busy = false, m_verified = false;
+    bool m_desired = false, m_busy = false, m_verified = false, m_recoveryRequired = false;
     quint64 m_generation = 0, m_revision = 0;
     QFuture<QString> m_firewallTask, m_verification;
     QTimer m_monitor;

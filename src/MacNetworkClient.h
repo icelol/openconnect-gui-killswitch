@@ -5,7 +5,8 @@
 #include <QTimer>
 #include <QHash>
 #include <functional>
-int queryNetworkServiceStatus(int argc, char** argv);
+int queryNetworkServiceStatus(int argc, char** argv, bool requireVerified = true);
+int disableNetworkServiceProtection(int argc, char** argv);
 
 class MacNetworkClient : public QObject {
     Q_OBJECT

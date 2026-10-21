@@ -106,6 +106,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    connect(ui->killSwitchOffButton, &QPushButton::clicked, this, [this] { toggleKillSwitch(false); });
     connect(this, &MainWindow::connectionErrorChanged, this, [this](const QString& error) {
         QMessageBox::warning(this, tr("VPN connection failed"), error);
     }, Qt::QueuedConnection);
@@ -172,10 +173,12 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
         initializeNetworkClient(service);
     } else {
         ui->killSwitchCheckBox->setEnabled(false);
+        ui->killSwitchOffButton->setEnabled(false);
         ui->killSwitchStatusLabel->setText(tr("Просмотр интерфейса — сеть не изменяется."));
     }
 #else
     ui->killSwitchCheckBox->hide();
+    ui->killSwitchOffButton->hide();
     ui->killSwitchStatusLabel->hide();
 #endif
 
@@ -543,7 +546,7 @@ void MainWindow::applyServiceStatus(const QJsonObject& status)
     else if (!firewall.value("error").toString().isEmpty())
         text = tr("Состояние защиты не подтверждено: %1").arg(firewall.value("error").toString());
     else if (!firewall.value("verified").toBool()) text = tr("Ожидание проверки системной защиты…");
-    else if (!m_confirmedArmed) text = tr("Выключено — обычный доступ к сети разрешён.");
+    else if (!m_confirmedArmed) text = tr("Выключено — блокировка OpenConnect снята. Правила других программ сохраняются.");
     else text = firewall.value("tunnel").toBool()
         ? tr("Включено — сеть доступна только через этот VPN.")
         : tr("Интернет заблокирован. Можно подключить VPN или выключить блокировку.");
@@ -578,7 +581,7 @@ void MainWindow::toggleKillSwitch(bool enabled)
     if (m_networkClient) {
         StoredServer profile;
         QString name = ui->serverList->currentText();
-        QString gateway = profile.load(name) ? profile.get_server_gateway() : name;
+        QString gateway = enabled ? (profile.load(name) ? profile.get_server_gateway() : name) : QString();
         if (!gateway.isEmpty() && !gateway.contains("://")) gateway.prepend("https://");
         ui->killSwitchStatusLabel->setText(enabled ? tr("Включение блокировки…") : tr("Выключение блокировки…"));
         m_networkClient->request("firewall", {{"enabled", enabled}, {"gateway", gateway}},
