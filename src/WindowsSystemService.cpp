@@ -385,6 +385,11 @@ int WindowsSystemService::recover()
 {
     if (!IsUserAnAdmin())
         return 1;
+    QString error;
+    if (!protectDirectory(error)) {
+        std::fprintf(stderr, "Recovery storage: %s\n", qPrintable(error));
+        return 1;
+    }
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     SC_HANDLE service = manager ? OpenServiceW(manager, name, SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_START) : nullptr;
     SERVICE_STATUS state{};
@@ -395,8 +400,9 @@ int WindowsSystemService::recover()
         return 1;
     }
     NetworkGuard guard({}, QDir(directory()).filePath("state.json"));
-    QString error;
     const bool ok = guard.disable(error) && guard.verify(error);
+    if (!ok)
+        std::fprintf(stderr, "Recovery failed: %s\n", qPrintable(error));
     if (service) {
         if (restart)
             StartServiceW(service, 0, nullptr);
@@ -417,7 +423,7 @@ int WindowsSystemService::uninstall()
     SC_HANDLE service = OpenServiceW(manager, name, SERVICE_STOP | SERVICE_QUERY_STATUS | DELETE);
     bool ok = true;
     if (service) {
-        ok = stopService(service) && DeleteService(service);
+        ok = stopService(service) && recover() == 0 && DeleteService(service);
         CloseServiceHandle(service);
     } else
         ok = GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST;

@@ -1,7 +1,8 @@
 name: Windows native candidate build
 on:
   push:
-    branches: [feature/windows-client]
+    branches: [main, feature/windows-client]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read

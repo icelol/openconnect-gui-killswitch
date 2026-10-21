@@ -24,8 +24,11 @@ if '--dependencies' not in sys.argv:
     if not ca.is_file():
         ca = pathlib.Path(subprocess.check_output(['cygpath', '-w', str(ca)], text=True).strip())
     shutil.copy2(ca, stage / 'ca-bundle.crt')
-    for name in ('LICENSE.txt', 'README.md', 'README.ru.md', 'VERSION'):
+    for name in ('LICENSE.txt', 'README.md', 'README.ru.md', 'VERSION', 'UPSTREAM.md', 'AUTHORS'):
         shutil.copy2(root / name, stage / name)
+    (stage/'docs').mkdir(exist_ok=True)
+    for name in ('windows.md','windows.ru.md','windows-architecture.md','macos-killswitch.md'):
+        shutil.copy2(root/'docs'/name,stage/'docs'/name)
     (stage / 'licenses').mkdir(exist_ok=True)
     for source in (root / 'docs/third-party').glob('*'):
         if source.is_file(): shutil.copy2(source, stage / 'licenses' / source.name)
