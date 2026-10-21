@@ -16,6 +16,7 @@ bool trustedServer(qintptr pipe);
 int dispatch(const std::function<int()>& run);
 bool stopping();
 int install();
+int stop();
 int uninstall();
 int recover();
 void hardenLibrarySearch();

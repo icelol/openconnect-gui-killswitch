@@ -221,10 +221,37 @@ bool WindowsSystemService::stopping() { return stopRequested; }
 int WindowsSystemService::dispatch(const std::function<int()>& run)
 {
     if (!isSystem()) return 1;
+    // SCM has no terminal. Keep bounded, administrator-only startup diagnostics;
+    // credentials and VPN forms are never written here.
+    QString error;
+    if (!protectDirectory(error)) return 1;
+    const auto log = QDir(directory()).filePath("service.log");
+    if (QFile::exists(log) && !trustedFile(log)) return 1;
+    if (QFile(log).size() > 1024 * 1024) {
+        const auto previous = log + ".previous";
+        if (QFile::exists(previous) && !trustedFile(previous)) return 1;
+        QFile::remove(previous);
+        if (!QFile::rename(log, previous)) return 1;
+    }
+    if (!_wfreopen(QDir::toNativeSeparators(log).toStdWString().c_str(), L"a", stderr)) return 1;
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
     hardenLibrarySearch(); serviceLoop = run;
     SERVICE_TABLE_ENTRYW table[]{{const_cast<LPWSTR>(name), serviceMain}, {nullptr, nullptr}};
     if (!StartServiceCtrlDispatcherW(table)) return 1;
     return serviceResult;
+}
+
+int WindowsSystemService::stop()
+{
+    if (!IsUserAnAdmin()) return 1;
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!manager) return 1;
+    SC_HANDLE service = OpenServiceW(manager, name, SERVICE_STOP | SERVICE_QUERY_STATUS);
+    const bool ok = service ? stopService(service) : GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST;
+    if (service) CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    // Persistent filters and the user's saved ON/OFF intent are retained.
+    return ok ? 0 : 1;
 }
 
 int WindowsSystemService::install()
@@ -239,7 +266,9 @@ int WindowsSystemService::install()
     }
     QString error;
     if (!protectDirectory(error)) { std::fprintf(stderr, "%s\n", qPrintable(error)); return 1; }
-    const auto sid = desktopSid(); if (sid.isEmpty()) return 1;
+    const auto existing = allowedUser();
+    const auto sid = existing.isEmpty() ? desktopSid() : existing;
+    if (sid.isEmpty()) return 1;
     QSaveFile file(QDir(directory()).filePath("service.json"));
     const auto json = QJsonDocument(QJsonObject{{"schema", 1}, {"userSid", sid}}).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(json) != json.size() || !file.commit()) return 1;

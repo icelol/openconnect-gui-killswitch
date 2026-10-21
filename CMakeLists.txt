@@ -72,7 +72,7 @@ endif()
 add_subdirectory(src)
 
 include(CTest)
-if(BUILD_TESTING AND APPLE)
+if(BUILD_TESTING AND (APPLE OR WIN32))
     add_subdirectory(tests)
 endif()
 

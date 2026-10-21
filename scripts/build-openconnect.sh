@@ -10,6 +10,8 @@ patch_file="$project_dir/patches/openconnect-9.21-tls12-policy.patch"
 expected='5b32369467db6e5f317aa1ed12cfcbb81ed00bdbc765450b6bfcbdc300944a58'
 mkdir -p "$deps/source"
 patch_hash=$(shasum -a 256 "$patch_file" | cut -d ' ' -f 1)
+ucrt_patch="$project_dir/patches/openconnect-9.21-ucrt.patch"
+patch_hash="$patch_hash:$(shasum -a 256 "$ucrt_patch" | cut -d ' ' -f 1)"
 stamp="$expected:$patch_hash:$(uname -s)"
 if [ -f "$prefix/ocgui-build-stamp" ] && [ -f "$prefix/include/openconnect.h" ] \
     && [ "$(cat "$prefix/ocgui-build-stamp")" = "$stamp" ]; then
@@ -28,6 +30,7 @@ fi
 if [ -d "$source" ]; then rm -rf "$source"; fi
 tar -xzf "$archive" -C "$deps/source"
 patch -d "$source" -p1 < "$patch_file"
+patch -d "$source" -p1 < "$ucrt_patch"
 case "$(uname -s)" in
     MINGW*|MSYS*) vpnc_script='vpnc-script.js' ;;
     *) vpnc_script='/etc/vpnc/vpnc-script' ;;

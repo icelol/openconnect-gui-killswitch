@@ -98,10 +98,12 @@ int main(int argc, char* argv[])
     WindowsSystemService::hardenLibrarySearch();
     for (int i = 1; i < argc; ++i) {
         const auto command = QString::fromLocal8Bit(argv[i]);
-        if (command == "--install-service" || command == "--uninstall-service" || command == "--recover-killswitch") {
+        if (command == "--install-service" || command == "--uninstall-service" || command == "--recover-killswitch"
+            || command == "--stop-service") {
             QCoreApplication app(argc, argv);
             return command == "--install-service" ? WindowsSystemService::install()
-                : command == "--uninstall-service" ? WindowsSystemService::uninstall() : WindowsSystemService::recover();
+                : command == "--uninstall-service" ? WindowsSystemService::uninstall()
+                : command == "--stop-service" ? WindowsSystemService::stop() : WindowsSystemService::recover();
         }
     }
 #endif

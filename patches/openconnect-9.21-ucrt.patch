@@ -1,0 +1,14 @@
+--- a/compat.c
++++ b/compat.c
+@@ -27,7 +27,11 @@
+ #include <inttypes.h>
+ 
+ #ifdef _WIN32
++/* UCRT declares errno_t and the secure CRT functions in stdlib.h. The
++ * legacy sec_api header is absent from current mingw-w64 UCRT packages. */
++#ifndef _UCRT
+ #include <sec_api/stdlib_s.h> /* errno_t, size_t */
++#endif
+ #ifndef HAVE_GETENV_S_DECL
+ errno_t getenv_s(
+ 	size_t     *ret_required_buf_size,

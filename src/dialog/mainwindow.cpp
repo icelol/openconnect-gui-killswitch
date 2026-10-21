@@ -1338,6 +1338,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::request_update_stats()
 {
+    if (m_networkClient) return; // The service sends authenticated statistics events.
     char cmd = OC_CMD_STATS;
     if (this->cmd_fd != INVALID_SOCKET) {
         int ret = pipe_write(this->cmd_fd, &cmd, 1);

@@ -29,7 +29,8 @@ if '--dependencies' not in sys.argv:
     (stage / 'licenses').mkdir(exist_ok=True)
     for source in (root / 'docs/third-party').glob('*'):
         if source.is_file(): shutil.copy2(source, stage / 'licenses' / source.name)
-    shutil.copy2(root / 'patches/openconnect-9.21-tls12-policy.patch', stage / 'licenses/')
+    for source in (root/'patches').glob('openconnect-9.21-*.patch'):
+        shutil.copy2(source, stage/'licenses'/source.name)
 
 search = [root / 'build/deps/openconnect/bin', prefix / 'bin']
 system = pathlib.Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32'

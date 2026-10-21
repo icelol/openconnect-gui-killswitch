@@ -28,12 +28,12 @@ FunctionEnd
 
 Section "OpenConnect and system protection" Main
   SectionIn RO
-  ; Stop the prior runtime before replacing its DLLs. Never globally reset WFP.
+  ; Stop the prior runtime while preserving persistent protection and ON intent.
   IfFileExists "$INSTDIR\openconnect-gui.exe" 0 fresh
-  nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --uninstall-service'
+  nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --stop-service'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "Could not stop and recover the previous OpenConnect service. Installation stopped."
+    MessageBox MB_ICONSTOP "Could not stop the previous OpenConnect service. Close its interface and retry."
     Abort
   ${EndIf}
   fresh:
@@ -45,10 +45,16 @@ Section "OpenConnect and system protection" Main
     MessageBox MB_ICONSTOP "The OpenConnect service could not be installed. See the installation details."
     Abort
   ${EndIf}
-  Sleep 2000
+  StrCpy $1 0
+  ready_retry:
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --service-ready'
   Pop $0
   ${If} $0 != 0
+    IntOp $1 $1 + 1
+    ${If} $1 < 10
+      Sleep 500
+      Goto ready_retry
+    ${EndIf}
     MessageBox MB_ICONSTOP "The OpenConnect service did not become ready."
     Abort
   ${EndIf}
@@ -59,6 +65,7 @@ Section "OpenConnect and system protection" Main
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnectKillSwitch" "DisplayName" "OpenConnect VPN + Kill Switch"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnectKillSwitch" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnectKillSwitch" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OpenConnectKillSwitch"
 SectionEnd
 
 Section "Open the interface at user login" Startup

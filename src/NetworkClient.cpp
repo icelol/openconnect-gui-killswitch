@@ -187,12 +187,16 @@ int disableNetworkServiceProtection(int argc, char** argv)
         if (accepted && state.value("schema").toInt() == 1
             && !firewall.value("busy").toBool() && !firewall.value("requested").toBool()
             && !firewall.value("armed").toBool() && firewall.value("verified").toBool()) {
-            std::printf("PASS: OpenConnect blocking is OFF. Other applications' PF rules were retained.\n");
+            std::printf("PASS: OpenConnect blocking is OFF. Other applications' firewall rules were retained.\n");
             app.exit(0);
         }
     });
     QTimer::singleShot(30000, &app, [&app] {
+#ifdef Q_OS_WIN
+        std::fprintf(stderr, "OFF was not confirmed. Run openconnect-gui.exe --recover-killswitch as administrator.\n");
+#else
         std::fprintf(stderr, "OFF was not confirmed. Use Recover Kill Switch.command for administrator recovery.\n");
+#endif
         app.exit(1);
     });
     client.start();

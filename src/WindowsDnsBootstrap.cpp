@@ -9,10 +9,14 @@
 #include <QUdpSocket>
 #include <QUrl>
 #include <QtEndian>
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <windows.h>
 #include <iphlpapi.h>
+#endif
 #include <memory>
 #include <cstring>
 #include <vector>
@@ -61,6 +65,7 @@ QByteArray tcp(const QHostAddress& server,const QByteArray& request)
 
 QStringList WindowsDnsBootstrap::systemServers()
 {
+#ifdef Q_OS_WIN
     ULONG length=16384;std::vector<uchar> data(length);
     ULONG result=GetAdaptersAddresses(AF_UNSPEC,GAA_FLAG_SKIP_ANYCAST|GAA_FLAG_SKIP_MULTICAST,nullptr,
         reinterpret_cast<IP_ADAPTER_ADDRESSES*>(data.data()),&length);
@@ -81,6 +86,9 @@ QStringList WindowsDnsBootstrap::systemServers()
         }
     }
     return addresses;
+#else
+    return {}; // Parser tests are portable; Windows owns resolver discovery.
+#endif
 }
 
 QStringList WindowsDnsBootstrap::response(const QByteArray& wire,quint16 id,const QString& host,quint16 type,bool& truncated)
@@ -98,7 +106,7 @@ QStringList WindowsDnsBootstrap::response(const QByteArray& wire,quint16 id,cons
         const auto kind=word(wire,at),cls=word(wire,at+2),length=word(wire,at+8);at+=10;
         if(at+length>wire.size())return {};
         Record record;record.owner=owner;
-        if(cls==1&&kind==5){int offset=at;if(!name(wire,offset,record.target)||offset>at+length)return {};}
+        if(cls==1&&kind==5){int offset=at;if(!name(wire,offset,record.target)||offset!=at+length)return {};}
         else if(cls==1&&kind==type&&kind==1&&length==4)record.address=QHostAddress(qFromBigEndian<quint32>(reinterpret_cast<const uchar*>(wire.constData()+at))).toString();
         else if(cls==1&&kind==type&&kind==28&&length==16){Q_IPV6ADDR address;std::memcpy(address.c,wire.constData()+at,16);record.address=QHostAddress(address).toString();}
         records<<record;at+=length;
