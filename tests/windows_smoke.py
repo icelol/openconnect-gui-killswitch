@@ -106,7 +106,7 @@ installer=next((root/'dist').glob('*Setup-windows-x64-*.exe'))
 report={'platform':sys.getwindowsversion().build,'version':(root/'VERSION').read_text().strip()}
 marker=root/'dist/windows-watchdog-finished'
 marker.unlink(missing_ok=True)
-watchdog=None;pipe=None;existing=None
+watchdog=None;pipe=None;existing=None;fixture=None
 foreign='OpenConnect-CI-Unrelated-Policy-78196d3a'
 try:
     run(installer,'/S',timeout=90)
@@ -151,6 +151,9 @@ try:
     report['wfp_udp']='blocked' if udp else 'baseline unavailable on hosted runner'
     report['existing_tcp_flow']='blocked after policy change'
     report['wfp_filter_policy']=diag
+    pipe.request('firewall',{'enabled':True,'gateway':'https://one.one.one.one'})
+    pipe.settled(True);assert not external()
+    report['new_gateway_dns_while_blocked']='passed'
     # Connect must still be accepted; an unreachable test gateway can be canceled.
     pipe.request('connect',{'gateway':'https://192.0.2.1','protocol':'anyconnect'})
     pipe.request('disconnect')
@@ -160,6 +163,40 @@ try:
     report['connect_and_cancel_while_blocked']='passed'
     pipe.request('firewall',{'enabled':False});pipe.settled(False)
     assert external(),'OFF did not restore IPv4 access'
+    # Run real username/password authentication, CSTP, Wintun address setup,
+    # and a bidirectional UDP packet through that adapter, while protection is ON.
+    from mock_anyconnect import MockAnyConnect
+    fixture=MockAnyConnect(root/'build/windows-fixture',runtime)
+    pipe.events.clear()
+    pipe.request('firewall',{'enabled':True,'gateway':fixture.url});pipe.settled(True)
+    pipe.request('connect',{'gateway':fixture.url,'protocol':'anyconnect','legacyAuth':True,'tls12Only':True,'disableUdp':True})
+    deadline=time.monotonic()+45
+    while True:
+        state=pipe.request('status')
+        events,pipe.events=pipe.events,[]
+        for event in events:
+            if event.get('event')=='auth':
+                answer='fixture-only' if event.get('secret') else 'ci-user'
+                pipe.request('auth',{'challenge':event['challenge'],'accepted':True,'answer':answer})
+            elif event.get('event')=='error':raise AssertionError('Fixture VPN: '+event.get('message',''))
+        if state['vpn']['state']=='connected':break
+        assert time.monotonic()<deadline,'Fixture VPN did not connect: '+json.dumps(state)
+        time.sleep(.1)
+    assert fixture.authenticated.is_set() and fixture.cstp.is_set()
+    assert state['firewall']['tunnel'], 'Connected VPN lacks verified adapter permission'
+    with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
+        probe.settimeout(5);probe.sendto(b'OpenConnect Wintun data-path QA',('192.0.2.1',12345))
+        payload,peer=probe.recvfrom(512)
+        assert payload==b'OpenConnect Wintun data-path QA' and peer==('192.0.2.1',12345)
+    assert fixture.data.is_set() and not external(), 'Tunnel or outside routing policy failed'
+    report['username_password_cstp_wintun_udp']='passed with local TLS fixture'
+    pipe.request('disconnect')
+    deadline=time.monotonic()+10
+    while pipe.request('status')['vpn']['state']!='disconnected':
+        assert time.monotonic()<deadline;time.sleep(.1)
+    assert not external(), 'Disconnect removed protection'
+    pipe.request('firewall',{'enabled':False});pipe.settled(False)
+    fixture.close();fixture=None
     # A fresh ON without a profile must also work.
     pipe.request('firewall',{'enabled':True,'gateway':''});pipe.settled(True)
     assert not external()
@@ -187,6 +224,7 @@ try:
     report['uninstall_and_recovery']='passed'
     marker.write_text('complete')
 finally:
+    if fixture:fixture.close()
     if existing:existing.close()
     if pipe:pipe.close()
     if runtime.exists():
