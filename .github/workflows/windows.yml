@@ -30,7 +30,8 @@ jobs:
             mingw-w64-ucrt-x86_64-gnutls mingw-w64-ucrt-x86_64-libxml2
             mingw-w64-ucrt-x86_64-stoken mingw-w64-ucrt-x86_64-lz4
             mingw-w64-ucrt-x86_64-spdlog mingw-w64-ucrt-x86_64-nsis
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: deps-cache
         with:
           path: |
             build/deps
@@ -38,6 +39,13 @@ jobs:
           key: windows-ucrt64-deps-v1-${{ hashFiles('scripts/build-openconnect.sh', 'patches/*.patch', 'CMake/Includes/ProjectExternals*') }}
       - name: Build and stage native client
         run: sh scripts/build-windows.sh
+      - uses: actions/cache/save@v4
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/deps
+            build/external
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
       - name: Test installed service and live WFP on this disposable runner
         run: python3 tests/windows_smoke.py
       - name: Upload candidate and build logs

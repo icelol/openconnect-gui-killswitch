@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -198,6 +199,35 @@ bool WindowsSystemService::protectDirectory(QString& error)
     return true;
 }
 
+bool WindowsSystemService::protectFile(const QString& path, QString& error)
+{
+    if (trustedFile(path))
+        return true;
+    if (!trustedFile(QFileInfo(path).absolutePath())) {
+        error = "Unsafe parent directory for service data";
+        return false;
+    }
+    const auto native = QDir::toNativeSeparators(path).toStdWString();
+    const auto attributes = GetFileAttributesW(native.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
+        error = "Invalid service data file";
+        return false;
+    }
+    // An elevated token can still use the individual account as default owner.
+    // Persisted data must remain trusted after SCM switches to LocalSystem.
+    PSID admins = nullptr;
+    if (!ConvertStringSidToSidW(L"S-1-5-32-544", &admins))
+        return false;
+    const auto result = SetNamedSecurityInfoW(const_cast<wchar_t*>(native.c_str()), SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION, admins, nullptr, nullptr, nullptr);
+    LocalFree(admins);
+    if (result != ERROR_SUCCESS || !trustedFile(path)) {
+        error = QString("Cannot protect service data ownership (%1)").arg(result);
+        return false;
+    }
+    return true;
+}
+
 QString WindowsSystemService::allowedUser()
 {
     if (!ownerSid.isEmpty())
@@ -353,6 +383,10 @@ int WindowsSystemService::install()
     const auto json = QJsonDocument(QJsonObject{ { "schema", 1 }, { "userSid", sid } }).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(json) != json.size() || !file.commit())
         return 1;
+    if (!protectFile(file.fileName(), error)) {
+        std::fprintf(stderr, "%s\n", qPrintable(error));
+        return 1;
+    }
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE | SC_MANAGER_CONNECT);
     if (!manager)
         return 1;

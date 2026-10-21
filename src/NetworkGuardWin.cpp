@@ -531,7 +531,7 @@ bool NetworkGuard::save(QString& error)
         error = "Cannot persist the Windows kill switch setting";
         return false;
     }
-    return true;
+    return WindowsSystemService::protectFile(m_statePath, error);
 }
 bool NetworkGuard::restore(QString& error) { return restoreBootProtection(error); }
 bool NetworkGuard::restoreBootProtection(QString& error)

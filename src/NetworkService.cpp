@@ -582,7 +582,10 @@ static int runNetworkServiceLoop(int argc, char** argv)
 #ifdef Q_OS_WIN
     const auto runtime = WindowsSystemService::directory();
     const auto user = WindowsSystemService::allowedUser();
-    if (user.isEmpty() || !WindowsSystemService::trustedFile(runtime)) return 1;
+    if (user.isEmpty() || !WindowsSystemService::trustedFile(runtime)) {
+        std::fprintf(stderr, "Service configuration ownership or account is invalid\n");
+        return 1;
+    }
     openconnect_init_ssl();
     NetworkGuard guard({}, runtime + "/state.json");
     QString recoveryError, error;
