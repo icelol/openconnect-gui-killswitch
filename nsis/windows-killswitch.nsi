@@ -25,6 +25,7 @@ Function .onInit
   ${EndIf}
   SetRegView 64
   SetShellVarContext all
+  StrCpy $INSTDIR "$PROGRAMFILES64\OpenConnect-GUI-KillSwitch"
 FunctionEnd
 
 Section "OpenConnect and system protection" Main
@@ -41,6 +42,15 @@ Section "OpenConnect and system protection" Main
   fresh:
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*"
+  ; Ownership must stay with the administrator group, including on runners or
+  ; endpoints whose elevated token uses the individual account as default owner.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /setowner "*S-1-5-32-544" /T /C'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP "Cannot protect ownership of the installed runtime." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\openconnect-gui.exe" --install-service'
   Pop $0
   Pop $2
@@ -84,6 +94,7 @@ SectionEnd
 Section "Uninstall"
   SetRegView 64
   SetShellVarContext all
+  StrCpy $INSTDIR "$PROGRAMFILES64\OpenConnect-GUI-KillSwitch"
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --uninstall-service'
   Pop $0
   ${If} $0 != 0
