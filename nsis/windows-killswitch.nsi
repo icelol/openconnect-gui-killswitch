@@ -19,7 +19,8 @@ ShowUninstDetails show
 
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "This build requires Windows x64."
+    MessageBox MB_ICONSTOP "This build requires Windows x64." /SD IDOK
+    SetErrorLevel 1
     Abort
   ${EndIf}
   SetRegView 64
@@ -33,7 +34,8 @@ Section "OpenConnect and system protection" Main
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --stop-service'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "Could not stop the previous OpenConnect service. Close its interface and retry."
+    MessageBox MB_ICONSTOP "Could not stop the previous OpenConnect service. Close its interface and retry." /SD IDOK
+    SetErrorLevel 1
     Abort
   ${EndIf}
   fresh:
@@ -42,7 +44,8 @@ Section "OpenConnect and system protection" Main
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --install-service'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "The OpenConnect service could not be installed. See the installation details."
+    MessageBox MB_ICONSTOP "The OpenConnect service could not be installed. See the installation details." /SD IDOK
+    SetErrorLevel 1
     Abort
   ${EndIf}
   StrCpy $1 0
@@ -55,7 +58,8 @@ Section "OpenConnect and system protection" Main
       Sleep 500
       Goto ready_retry
     ${EndIf}
-    MessageBox MB_ICONSTOP "The OpenConnect service did not become ready."
+    MessageBox MB_ICONSTOP "The OpenConnect service did not become ready." /SD IDOK
+    SetErrorLevel 1
     Abort
   ${EndIf}
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -78,7 +82,8 @@ Section "Uninstall"
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --uninstall-service'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "OpenConnect could not confirm removal of its own filters. Nothing else was deleted."
+    MessageBox MB_ICONSTOP "OpenConnect could not confirm removal of its own filters. Nothing else was deleted." /SD IDOK
+    SetErrorLevel 1
     Abort
   ${EndIf}
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OpenConnectKillSwitch"

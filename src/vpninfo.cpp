@@ -455,7 +455,7 @@ static void setup_tun_vfn(void* privdata)
     vpn->logVpncScriptOutput();
 }
 
-static inline int set_sock_block(int fd)
+static inline int set_sock_block(SOCKET fd)
 {
 #ifdef _WIN32
     unsigned long mode = 0;

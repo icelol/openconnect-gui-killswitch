@@ -55,7 +55,7 @@ private:
     std::atomic<bool> m_reportedError{false}, m_connected{false};
     QTimer m_connectDeadline;
     QString m_phase = "preparing";
-    int m_fd = -1;
+    qintptr m_fd = -1; // SOCKET is pointer-sized on Windows x64.
     std::atomic<bool> m_cancelled{false};
 };
 

@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Destructive networking QA ONLY on a disposable Windows GitHub Actions runner.
+
+Never run this on an employee endpoint. An independent recovery watchdog is
+started before ON. It uses the installed runtime's owned-provider recovery.
+"""
+import ctypes
+from ctypes import wintypes
+import json
+import os
+import pathlib
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+assert os.name == 'nt' and os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_OS') == 'Windows', 'Disposable Windows runner required'
+assert ctypes.windll.shell32.IsUserAnAdmin(), 'Administrator runner required'
+root = pathlib.Path(__file__).resolve().parents[1]
+runtime = pathlib.Path(os.environ['ProgramFiles'])/'OpenConnect-GUI-KillSwitch/openconnect-gui.exe'
+data = pathlib.Path(os.environ['ProgramData'])/'OpenConnect-GUI-KillSwitch'
+
+def run(*args, timeout=35):
+    result = subprocess.run([str(x) for x in args], capture_output=True, text=True, errors='replace', timeout=timeout)
+    if result.returncode:
+        raise AssertionError('Command failed: '+pathlib.Path(str(args[0])).name+' '+str(args[1:])+'\n'+result.stdout[-3000:]+'\n'+result.stderr[-3000:])
+    return result.stdout
+
+if '--watchdog' in sys.argv:
+    marker = pathlib.Path(sys.argv[-1])
+    for _ in range(180):
+        if marker.exists(): sys.exit(0)
+        time.sleep(1)
+    subprocess.run([str(runtime), '--recover-killswitch'], timeout=45)
+    sys.exit(0)
+
+kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+kernel.CreateFileW.argtypes = [wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+kernel.CreateFileW.restype = wintypes.HANDLE
+kernel.PeekNamedPipe.argtypes = [wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.c_void_p,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p]
+kernel.ReadFile.argtypes = [wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p]
+kernel.WriteFile.argtypes = kernel.ReadFile.argtypes
+kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+
+class Pipe:
+    def __init__(self):
+        self.handle = kernel.CreateFileW(r'\\.\pipe\OpenConnectKillSwitch-control-v1',0xc0000000,0,None,3,0x00120000,None)
+        assert self.handle != ctypes.c_void_p(-1).value, 'Cannot open authenticated control pipe: '+str(ctypes.get_last_error())
+        self.buffer=b'';self.serial=0;self.events=[]
+    def close(self):
+        if self.handle: kernel.CloseHandle(self.handle);self.handle=None
+    def read(self, deadline):
+        while time.monotonic()<deadline:
+            if b'\n' in self.buffer:
+                line,self.buffer=self.buffer.split(b'\n',1);return json.loads(line)
+            available=wintypes.DWORD()
+            if not kernel.PeekNamedPipe(self.handle,None,0,None,ctypes.byref(available),None):
+                raise AssertionError('Control pipe closed: '+str(ctypes.get_last_error()))
+            if available.value:
+                value=ctypes.create_string_buffer(min(available.value,65536));read=wintypes.DWORD()
+                assert kernel.ReadFile(self.handle,value,len(value),ctypes.byref(read),None)
+                self.buffer+=value.raw[:read.value];assert len(self.buffer)<=65536
+            else: time.sleep(.02)
+        raise AssertionError('Service response deadline exceeded')
+    def request(self, method, params=None, error=False):
+        self.serial+=1
+        value=(json.dumps({'id':self.serial,'method':method,'params':params or {}})+'\n').encode()
+        sent=wintypes.DWORD();assert kernel.WriteFile(self.handle,value,len(value),ctypes.byref(sent),None) and sent.value==len(value)
+        deadline=time.monotonic()+8
+        while True:
+            reply=self.read(deadline)
+            if reply.get('id')==self.serial:
+                if error: assert reply.get('error'), 'Invalid request was accepted'
+                else: assert not reply.get('error'), reply.get('error')
+                return reply.get('result',{})
+            self.events.append(reply)
+    def settled(self, enabled):
+        deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            state=self.request('status');fw=state['firewall']
+            if not fw['busy'] and fw['verified'] and fw['armed']==enabled and fw['requested']==enabled:
+                return state
+            if not fw['busy'] and fw['error']: raise AssertionError(fw['error'])
+            time.sleep(.1)
+        raise AssertionError('Firewall did not reach confirmed state: '+json.dumps(state))
+
+def external(ip='1.1.1.1', port=443):
+    try:
+        with socket.create_connection((ip,port),timeout=2):return True
+    except OSError:return False
+
+installer=next((root/'dist').glob('*Setup-windows-x64-*.exe'))
+report={'platform':sys.getwindowsversion().build,'version':(root/'VERSION').read_text().strip()}
+marker=root/'dist/windows-watchdog-finished'
+marker.unlink(missing_ok=True)
+watchdog=None;pipe=None
+try:
+    run(installer,'/S',timeout=90)
+    run(runtime,'--service-ready') # Production client verifies SCM identity, not just a pipe name.
+    pipe=Pipe();state=pipe.settled(False)
+    assert state['service']['version']==report['version']
+    report['installation_and_authenticated_status']='passed'
+    pipe.request('firewall',{'enabled':'yes'},error=True)
+    pipe.request('connect',{'gateway':'https://vpn.example.net','script':'untrusted.cmd'},error=True)
+    report['invalid_ipc_requests']='rejected'
+    # Run the installed GUI with only its packaged runtime, not MSYS2's PATH.
+    clean={**os.environ,'PATH':str(pathlib.Path(os.environ['SystemRoot'])/'System32')}
+    gui=subprocess.Popen([str(runtime)],env=clean)
+    time.sleep(3);assert gui.poll() is None,'Installed GUI exited at startup'
+    gui.terminate();gui.wait(10)
+    report['packaged_gui_startup']='passed'
+    assert external(), 'External baseline is unavailable'
+    ipv6=external('2606:4700:4700::1111')
+    watchdog=subprocess.Popen([sys.executable,__file__,'--watchdog',str(marker)])
+    pipe.request('firewall',{'enabled':True,'gateway':'https://1.1.1.1'})
+    pipe.settled(True)
+    assert not external(), 'IPv4 traffic escaped enabled protection'
+    if ipv6: assert not external('2606:4700:4700::1111'),'IPv6 traffic escaped enabled protection'
+    diag=pipe.request('diagnostics')
+    assert diag['persistentBlockLayers']==4 and diag['ownedFilterCount']>=21,diag
+    report['wfp_ipv4']='blocked'
+    report['wfp_ipv6']='blocked' if ipv6 else 'baseline unavailable on hosted runner'
+    report['wfp_filter_policy']=diag
+    # Connect must still be accepted; an unreachable test gateway can be canceled.
+    pipe.request('connect',{'gateway':'https://192.0.2.1','protocol':'anyconnect'})
+    pipe.request('disconnect')
+    deadline=time.monotonic()+10
+    while pipe.request('status')['vpn']['state']!='disconnected':
+        assert time.monotonic()<deadline,'Cancel did not finish';time.sleep(.1)
+    report['connect_and_cancel_while_blocked']='passed'
+    pipe.request('firewall',{'enabled':False});pipe.settled(False)
+    assert external(),'OFF did not restore IPv4 access'
+    # A fresh ON without a profile must also work.
+    pipe.request('firewall',{'enabled':True,'gateway':''});pipe.settled(True)
+    assert not external()
+    pipe.close();pipe=None
+    run(runtime,'--stop-service')
+    assert not external(),'Stopping the service removed persistent blocking'
+    run(runtime,'--install-service');run(runtime,'--service-ready')
+    pipe=Pipe();pipe.settled(True)
+    report['service_restart_preserves_on']='passed'
+    # Execute the actual installer again with ON, retaining blocking and intent.
+    pipe.close();pipe=None
+    run(installer,'/S',timeout=90)
+    pipe=Pipe();pipe.settled(True);assert not external()
+    report['installer_upgrade_preserves_on']='passed'
+    pipe.request('firewall',{'enabled':False});pipe.settled(False)
+    assert external();report['explicit_off_restores_network']='passed'
+    pipe.close();pipe=None
+    uninstall=runtime.parent/'Uninstall.exe'
+    run(uninstall,'/S','_?='+str(runtime.parent),timeout=60)
+    assert not (data/'state.json').exists(),'Uninstall left service state'
+    assert external(),'Uninstall did not leave network available'
+    report['uninstall_and_recovery']='passed'
+    marker.write_text('complete')
+finally:
+    if pipe:pipe.close()
+    if runtime.exists():
+        try:run(runtime,'--recover-killswitch',timeout=45)
+        finally:
+            if (data/'service.log').exists():shutil.copy2(data/'service.log',root/'dist/windows-service.log')
+    marker.write_text('finished')
+    if watchdog:watchdog.wait(5)
+    (root/'dist/windows-verification.json').write_text(json.dumps(report,indent=2)+'\n')
+print(json.dumps(report,indent=2))

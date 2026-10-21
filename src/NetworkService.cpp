@@ -35,7 +35,7 @@ namespace {
 constexpr qint64 maxMessage = 64 * 1024;
 volatile std::sig_atomic_t stopping = 0;
 void requestStop(int) { stopping = 1; }
-void writeCommand(int fd, char command)
+void writeCommand(qintptr fd, char command)
 {
 #ifdef Q_OS_WIN
     (void)::send(SOCKET(fd), &command, 1, 0);
