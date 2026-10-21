@@ -528,7 +528,7 @@ bool NetworkGuard::save(QString& error)
     QSaveFile file(m_statePath);
     const auto data = QJsonDocument(object).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
-        error = "Cannot persist the Windows kill switch setting";
+        error = "Cannot persist the Windows kill switch setting: " + file.errorString();
         return false;
     }
     return WindowsSystemService::protectFile(m_statePath, error);
@@ -564,6 +564,9 @@ bool NetworkGuard::restoreBootProtection(QString& error)
     }
     QJsonParseError parse;
     const auto object = QJsonDocument::fromJson(file.readAll(), &parse).object();
+    // Windows refuses to replace a file whose read handle is still open.
+    // Restore below writes a fresh journal atomically, including explicit OFF.
+    file.close();
     if (parse.error != QJsonParseError::NoError || object.value("schema").toInt() != 2 || !object.value("enabled").isBool()) {
         error = "Invalid Windows service state";
         return false;
