@@ -527,6 +527,8 @@ void MainWindow::initializeNetworkClient(MacNetworkClient* client)
                 dialog->setTextValue({}); dialog->deleteLater();
             });
             dialog->show();
+        } else if (kind == "progress") {
+            Logger::instance().addMessage(event.value("message").toString());
         }
     });
     QTimer::singleShot(0, m_networkClient, &MacNetworkClient::start);
@@ -1139,6 +1141,8 @@ void MainWindow::on_connectClicked()
         const QJsonObject profile{{"gateway", turl.toString()}, {"protocol", ss->get_protocol_name()},
             {"proxy", ss->get_proxy()}, {"username", ss->get_username()}, {"group", ss->get_groupname()},
             {"disableUdp", ss->get_disable_udp()}, {"reconnectTimeout", ss->get_reconnect_timeout()},
+            {"tls12Only", ss->get_tls12_only()},
+            {"legacyAuth", ss->get_legacy_auth()},
             {"dtlsPeriod", ss->get_dtls_reconnect_timeout()}};
         minimize_on_connect = ss->get_minimize();
         const bool unsupportedFiles = !ss->get_cert_file().isEmpty() || !ss->get_ca_cert_file().isEmpty()

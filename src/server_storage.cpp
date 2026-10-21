@@ -32,6 +32,8 @@ StoredServer::StoredServer()
     , m_minimize_on_connect{ false }
     , m_proxy{ false }
     , m_disable_udp{ false }
+    , m_tls12_only{ false }
+    , m_legacy_auth{ false }
     , m_reconnect_timeout{ 300 }
     , m_dtls_attempt_period{ 25 }
     , m_token_type{ OC_TOKEN_MODE_NONE }
@@ -183,6 +185,8 @@ int StoredServer::load(QString& name)
     this->m_batch_mode = settings.value("batch", false).toBool();
     this->m_proxy = settings.value("proxy", false).toBool();
     this->m_disable_udp = settings.value("disable-udp", false).toBool();
+    this->m_tls12_only = settings.value("tls12-only", false).toBool();
+    this->m_legacy_auth = settings.value("legacy-auth", false).toBool();
     this->m_minimize_on_connect = settings.value("minimize-on-connect", false).toBool();
     this->m_reconnect_timeout = settings.value("reconnect-timeout", 300).toInt();
     this->m_dtls_attempt_period = settings.value("dtls_attempt_period", 25).toInt();
@@ -268,6 +272,8 @@ int StoredServer::save()
     settings.setValue("batch", this->m_batch_mode);
     settings.setValue("proxy", this->m_proxy);
     settings.setValue("disable-udp", this->m_disable_udp);
+    settings.setValue("tls12-only", this->m_tls12_only);
+    settings.setValue("legacy-auth", this->m_legacy_auth);
     settings.setValue("minimize-on-connect", this->m_minimize_on_connect);
     settings.setValue("reconnect-timeout", this->m_reconnect_timeout);
     settings.setValue("dtls_attempt_period", this->m_dtls_attempt_period);
@@ -369,6 +375,11 @@ bool StoredServer::get_disable_udp() const
 {
     return this->m_disable_udp;
 }
+
+bool StoredServer::get_tls12_only() const { return m_tls12_only; }
+void StoredServer::set_tls12_only(bool value) { m_tls12_only = value; }
+bool StoredServer::get_legacy_auth() const { return m_legacy_auth; }
+void StoredServer::set_legacy_auth(bool value) { m_legacy_auth = value; }
 
 QString StoredServer::get_client_cert_pin()
 {

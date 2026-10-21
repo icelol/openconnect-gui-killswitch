@@ -46,6 +46,10 @@ public:
 
     bool get_disable_udp() const;
     void set_disable_udp(bool v);
+    bool get_tls12_only() const;
+    void set_tls12_only(bool v);
+    bool get_legacy_auth() const;
+    void set_legacy_auth(bool v);
 
     QString get_cert_file();
     QString get_key_file();
@@ -116,6 +120,8 @@ private:
     bool m_minimize_on_connect;
     bool m_proxy;
     bool m_disable_udp;
+    bool m_tls12_only;
+    bool m_legacy_auth;
     int m_reconnect_timeout;
     int m_dtls_attempt_period;
     QString m_username;

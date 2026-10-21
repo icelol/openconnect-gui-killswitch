@@ -2,6 +2,7 @@
 #include "MacNetworkService.h"
 #include "MacBootGuard.h"
 #include "MacPfStates.h"
+#include "VpnProgress.h"
 #include "server_storage.h"
 #include "vpninfo.h"
 #include <QCoreApplication>
@@ -12,6 +13,7 @@
 #include <QJsonDocument>
 #include <QLockFile>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSet>
 #include <QtConcurrent/QtConcurrentRun>
 #include <sys/stat.h>
@@ -44,7 +46,23 @@ QString networkServiceSocket()
 }
 
 ServiceVpnSession::ServiceVpnSession(MacKillSwitch* guard, const QJsonObject& profile, QObject* parent)
-    : QThread(parent), m_guard(guard), m_profile(profile) {}
+    : QThread(parent), m_guard(guard), m_profile(profile)
+{
+    m_connectDeadline.setParent(this);
+    m_connectDeadline.setObjectName("vpnConnectDeadline");
+    m_connectDeadline.setSingleShot(true);
+    m_connectDeadline.setInterval(20000);
+    connect(&m_connectDeadline, &QTimer::timeout, this, [this] {
+        if (m_cancelled || m_connected || awaitingInput()) return;
+        error("VPN connection timed out before login completed. Check the network/TLS settings and the connection log.");
+        cancel();
+    });
+    connect(this, &ServiceVpnSession::notification, this, [this](const QJsonObject& event) {
+        const auto kind = event.value("event").toString();
+        if (kind == "auth" || kind == "connected" || kind == "error") m_connectDeadline.stop();
+    });
+    m_connectDeadline.start();
+}
 
 ServiceVpnSession::~ServiceVpnSession() { cancel(); wait(); }
 
@@ -81,6 +99,7 @@ bool ServiceVpnSession::answer(const QString& challenge, bool accepted, const QS
     }
     m_answered = true;
     m_answerReady.wakeAll();
+    if (accepted) m_connectDeadline.start();
     return true;
 }
 
@@ -107,6 +126,7 @@ bool ServiceVpnSession::input(const QString& title, const QString& label, const 
 void ServiceVpnSession::connected(const QString& dns, const QString& ip, const QString& ip6,
     const QString& cstp, const QString& dtls)
 {
+    m_connected = true;
     emit notification({{"event", "connected"}, {"dns", dns}, {"ip", ip}, {"ip6", ip6},
         {"cstp", cstp}, {"dtls", dtls}});
 }
@@ -119,8 +139,7 @@ void ServiceVpnSession::stats(const oc_stats* value, const QString& dtls)
 
 void ServiceVpnSession::error(const QString& message)
 {
-    if (!m_cancelled && !m_reportedError) {
-        m_reportedError = true;
+    if (!m_cancelled && !m_reportedError.exchange(true)) {
         emit notification({{"event", "error"}, {"message", message.left(4096)}});
     }
 }
@@ -128,6 +147,14 @@ void ServiceVpnSession::error(const QString& message)
 void ServiceVpnSession::firewallError(const QString& message)
 {
     emit notification({{"event", "firewallError"}, {"message", message.left(4096)}});
+}
+
+void ServiceVpnSession::progress(int level, const QString& message)
+{
+    if (level > PRG_INFO || m_cancelled) return;
+    const auto safe = safeVpnProgress(message);
+    if (safe.isEmpty()) return;
+    emit notification({{"event", "progress"}, {"message", safe}, {"level", level}});
 }
 
 void ServiceVpnSession::run()
@@ -139,6 +166,8 @@ void ServiceVpnSession::run()
     profile->set_username(m_profile.value("username").toString().left(1024));
     profile->set_groupname(m_profile.value("group").toString().left(1024));
     profile->set_disable_udp(m_profile.value("disableUdp").toBool());
+    profile->set_tls12_only(m_profile.value("tls12Only").toBool());
+    profile->set_legacy_auth(m_profile.value("legacyAuth").toBool());
     profile->set_reconnect_timeout(qBound(1, m_profile.value("reconnectTimeout").toInt(300), 3600));
     profile->set_dtls_reconnect_timeout(qBound(1, m_profile.value("dtlsPeriod").toInt(25), 120));
     // Credentials are requested over authenticated IPC and retained only in
@@ -344,10 +373,12 @@ void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& reques
     if (method == "connect") {
         if (m_session || !m_pendingProfile.isEmpty()) { reply(socket, id, {}, "VPN session is already running"); return; }
         if (!supportedKeys(params, {"gateway", "protocol", "proxy", "username", "group",
-                "disableUdp", "reconnectTimeout", "dtlsPeriod"})) {
+                "disableUdp", "tls12Only", "legacyAuth", "reconnectTimeout", "dtlsPeriod"})) {
             reply(socket, id, {}, "Unsupported VPN parameter; scripts, files and saved credentials are not accepted"); return;
         }
         if (!validGateway(params.value("gateway").toString(), error)
+            || (params.contains("tls12Only") && !params.value("tls12Only").isBool())
+            || (params.contains("legacyAuth") && !params.value("legacyAuth").isBool())
             || !supportedProtocol(params.value("protocol").toString("anyconnect")) || params.value("proxy").toBool()) {
             reply(socket, id, {}, error.isEmpty() ? "Select a supported OpenConnect protocol without a proxy" : error); return;
         }
@@ -418,6 +449,8 @@ void MacNetworkService::sessionEvent(const QJsonObject& event)
     const auto kind = event.value("event").toString();
     if (kind == "auth") {
         if (m_owner) send(m_owner, event); else if (m_session) m_session->cancel();
+    } else if (kind == "progress") {
+        if (m_owner) send(m_owner, event);
     } else if (kind == "connected") {
         m_vpnDetails = event; m_vpnDetails.remove("event"); m_vpnState = "connected"; broadcast();
     } else if (kind == "firewallError") {

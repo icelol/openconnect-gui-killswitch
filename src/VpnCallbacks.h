@@ -14,4 +14,5 @@ public:
     virtual void stats(const oc_stats* statistics, const QString& dtls) = 0;
     virtual void error(const QString& message) = 0;
     virtual void firewallError(const QString& message) = 0;
+    virtual void progress(int, const QString&) { }
 };

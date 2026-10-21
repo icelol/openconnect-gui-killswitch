@@ -11,7 +11,7 @@
 // Modify it when settings should become intentionally incompatible.
 class OcSettings : public QSettings {
 public:
-    OcSettings() : QSettings("OpenConnect-GUI Team",
+    OcSettings() : QSettings(QSettings::defaultFormat(), QSettings::UserScope, "OpenConnect-GUI Team",
         QCoreApplication::instance() && QCoreApplication::instance()->property("previewMode").toBool()
             ? "OpenConnect-GUI-KillSwitch-Preview" : "OpenConnect-GUI-KillSwitch")
     {

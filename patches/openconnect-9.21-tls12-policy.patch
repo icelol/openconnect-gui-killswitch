@@ -1,0 +1,72 @@
+--- a/openconnect.h
++++ b/openconnect.h
+@@ -677,6 +677,10 @@
+ void openconnect_set_cert_expiry_warning(struct openconnect_info *vpninfo,
+ 					 int seconds);
+ void openconnect_set_pfs(struct openconnect_info *vpninfo, unsigned val);
++
++/* OCGUI extension: TLS 1.2 compatibility without changing trust or ciphers. */
++int openconnect_set_tls12_only(struct openconnect_info *vpninfo, unsigned val);
++void openconnect_set_password_auth_only(struct openconnect_info *vpninfo, unsigned val);
+ int openconnect_set_allow_insecure_crypto(struct openconnect_info *vpninfo, unsigned val);
+ 
+ /* If this is set, then openconnect_obtain_cookie() will abort and return
+--- a/openconnect-internal.h
++++ b/openconnect-internal.h
+@@ -588,6 +588,7 @@
+ 
+ 	unsigned pfs;
+ 	unsigned no_tls13;
++	unsigned ocgui_tls12_only;
+ 	unsigned allow_insecure_crypto;        /* Allow 3DES and RC4 (known-insecure, but the best that some ancient servers can do) */
+ #if defined(OPENCONNECT_OPENSSL)
+ #ifdef HAVE_LIBP11
+--- a/library.c
++++ b/library.c
+@@ -1301,6 +1301,23 @@
+ 	return 0;
+ }
+ 
++void openconnect_set_password_auth_only(struct openconnect_info *vpninfo, unsigned val)
++{
++	vpninfo->no_external_auth = !!val;
++}
++
++int openconnect_set_tls12_only(struct openconnect_info *vpninfo, unsigned val)
++{
++#ifdef OPENCONNECT_GNUTLS
++	vpninfo->ocgui_tls12_only = !!val;
++	free(vpninfo->ciphersuite_config);
++	vpninfo->ciphersuite_config = NULL;
++	return 0;
++#else
++	return val ? -EOPNOTSUPP : 0;
++#endif
++}
++
+ void openconnect_set_pfs(struct openconnect_info *vpninfo, unsigned val)
+ {
+ 	vpninfo->pfs = val;
+--- a/gnutls.c
++++ b/gnutls.c
+@@ -2421,6 +2421,9 @@
+ 		buf_append(buf, "NORMAL:-VERS-SSL3.0:+SHA256:%%COMPAT");
+ #endif
+ 
++		if (vpninfo->ocgui_tls12_only)
++			buf_append(buf, ":-VERS-ALL:+VERS-TLS1.2");
++
+ 		if (vpninfo->pfs)
+ 			buf_append(buf, ":-RSA");
+ 
+--- a/libopenconnect.map.in
++++ b/libopenconnect.map.in
+@@ -39,6 +39,8 @@
+ 	openconnect_set_mobile_info;
+ 	openconnect_set_option_value;
+ 	openconnect_set_pfs;
++	openconnect_set_tls12_only;
++	openconnect_set_password_auth_only;
+ 	openconnect_set_protect_socket_handler;
+ 	openconnect_set_proxy_auth;
+ 	openconnect_set_reported_os;

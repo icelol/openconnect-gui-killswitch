@@ -17,6 +17,8 @@ server address, internal Git remote or credentials are bundled or preconfigured.
   Pulse/Ivanti, GlobalProtect, F5, Fortinet and Array, when supported by that library.
 - A privileged background service owns the VPN and firewall; the GUI runs as your user.
 - Closing the GUI or disconnecting the VPN does not disable an enabled kill switch.
+- Optional per-profile TLS 1.2 and legacy AnyConnect login compatibility.
+- Connection progress reaches **View log**; stalled pre-login attempts time out.
 - Installer includes complete removal; the DMG includes cleanup and recovery launchers.
 
 OpenConnect is an SSL VPN client. OpenVPN `.ovpn` and WireGuard profiles require
@@ -49,6 +51,12 @@ Python are not required on the computer running the installed application.
 The switch also works before any profile exists: it blocks ordinary traffic until
 VPN connection or an explicit switch-off. An update closes this client's existing
 VPN session and preserves the selected protection state. Reconnect after updating.
+
+For gateways that stall before showing the username/password form, edit the profile
+and enable **«Совместимость: только TLS 1.2»** and, if required,
+**«Вход Cisco без XML POST»**. These settings are off by default and apply only to
+that profile. TLS 1.0/1.1, obsolete ciphers and certificate bypasses are not enabled.
+The service uses direct password forms; browser SSO is not advertised.
 
 Network bootstrap exceptions are loopback, DHCP, IPv6 NDP and root-owned connections
 to the selected gateway IPs/ports. To resolve a new gateway while blocked, the
@@ -112,6 +120,9 @@ checks signatures, then creates PKG, DMG and portable SHA-256 files in `dist/`.
 It never installs the application or changes the live firewall. The intermediate
 GUI bundle stays in `.app-build.noindex` to avoid duplicate search entries.
 The bundled trust store comes from the vendor CA package, not local custom roots.
+The build script downloads OpenConnect 9.21 with a pinned SHA-256 and applies the
+small compatibility API patch. Each release includes the corresponding modified
+LGPL library source archive. No system OpenConnect library is overwritten.
 
 ```sh
 python3 scripts/validate-release.py

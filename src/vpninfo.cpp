@@ -20,6 +20,7 @@
 #include "vpninfo.h"
 #include "MacKillSwitch.h"
 #include "VpnCallbacks.h"
+#include "VpnProgress.h"
 #include "config.h"
 #include "dialog/MyCertMsgBox.h"
 #include "dialog/MyInputDialog.h"
@@ -83,12 +84,13 @@ static void progress_vfn(void* privdata, int level, const char* fmt, ...)
     len = strlen(buf);
     if (len && buf[len - 1] == '\n')
         buf[len - 1] = 0;
-    Logger::instance().addMessage(buf);
+    static_cast<VpnInfo*>(privdata)->recordProgress(level, QString::fromUtf8(buf));
 }
 
 static int process_auth_form(void* privdata, struct oc_auth_form* form)
 {
     VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
+    vpn->authFormSeen = true;
     bool ok;
     QString text;
     struct oc_form_opt* opt;
@@ -540,6 +542,27 @@ int VpnInfo::connect()
     QString cert_file, key_file;
     QString ca_file;
 
+#ifdef OCGUI_HAVE_TLS12_API
+    if (callbacks) openconnect_set_password_auth_only(vpninfo, 1);
+#endif
+    if (ss->get_legacy_auth()) {
+        openconnect_set_xmlpost(vpninfo, 0);
+        recordProgress(PRG_INFO, QObject::tr("Cisco compatibility: legacy login form without XML POST."));
+    }
+
+    if (ss->get_tls12_only()) {
+#ifdef OCGUI_HAVE_TLS12_API
+        if (openconnect_set_tls12_only(vpninfo, 1) != 0) {
+            last_err = QObject::tr("This OpenConnect TLS backend cannot apply TLS 1.2 compatibility.");
+            return -1;
+        }
+        recordProgress(PRG_INFO, QObject::tr("TLS compatibility: TLS 1.2 only; certificate and hostname checks remain enabled."));
+#else
+        last_err = QObject::tr("Install a build with TLS 1.2 compatibility support.");
+        return -1;
+#endif
+    }
+
     if (killSwitch) {
         if (killSwitch->isRequested() && ss->get_proxy()) {
             last_err = QObject::tr("Kill switch supports direct OpenConnect connections. Disable the profile proxy first.");
@@ -608,7 +631,9 @@ int VpnInfo::connect()
 
     ret = openconnect_obtain_cookie(vpninfo);
     if (ret != 0) {
-        this->last_err = QObject::tr("Authentication error; cannot obtain cookie");
+        this->last_err = authFormSeen ? QObject::tr("VPN authentication did not complete.")
+            : QObject::tr("Could not reach the VPN login form (TLS/network error).");
+        if (!m_lastProgressError.isEmpty()) last_err += "\n" + m_lastProgressError;
         return ret;
     }
 
@@ -809,6 +834,15 @@ void VpnInfo::logVpncScriptOutput()
     } else {
         Logger::instance().addMessage(QLatin1String("Could not open ") + QDir::toNativeSeparators(tfile) + ": " + file.errorString());
     }
+}
+
+void VpnInfo::recordProgress(int level, const QString& message)
+{
+    const auto safe = safeVpnProgress(message);
+    if (safe.isEmpty()) return;
+    if (level == PRG_ERR) m_lastProgressError = safe.left(1024);
+    if (callbacks) callbacks->progress(level, safe);
+    else Logger::instance().addMessage(safe);
 }
 
 bool VpnInfo::requestInput(const QString& title, const QString& label, const QStringList& choices,

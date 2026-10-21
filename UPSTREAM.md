@@ -16,6 +16,16 @@ QtSingleApplication is pinned to Qt Solutions commit
 `777e95ba69952f11eaec0adfb0cb987fabcdecb3`.
 Homebrew supplies the library packages and their source/build metadata.
 
+Starting with 1.1.2, libOpenConnect is built from the official
+[OpenConnect 9.21 release](https://www.infradead.org/openconnect/download/openconnect-9.21.tar.gz),
+SHA-256 `5b32369467db6e5f317aa1ed12cfcbb81ed00bdbc765450b6bfcbdc300944a58`.
+`patches/openconnect-9.21-tls12-policy.patch` adds two small per-session APIs for
+TLS 1.2 compatibility and disabling unsupported external-browser authentication.
+The patch follows libOpenConnect's LGPL-2.1-or-later license; the notice is included
+in the app and `docs/third-party/openconnect-LGPL-2.1.txt`. Releases provide the
+complete corresponding modified library source, with the build script in this
+repository. The original public CA trust and certificate validation are retained.
+
 PF state handling uses public Apple XNU structures and information from pfctl-rs.
 The MIT notice is preserved in
 [docs/third-party/pfctl-rs-MIT.txt](docs/third-party/pfctl-rs-MIT.txt) and included in

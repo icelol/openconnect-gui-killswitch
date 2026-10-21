@@ -19,8 +19,15 @@ for program in cmake ninja macdeployqt brew python3; do
     fi
 done
 
+sh "$project_dir/scripts/build-openconnect.sh"
+PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export PKG_CONFIG_PATH
+
 cmake -S "$project_dir" -B "$build_dir" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET="$target_version"
+if ! grep -q '^#define OCGUI_HAVE_TLS12_API' "$build_dir/src/config.h"; then
+    printf '%s\n' 'Release requires the pinned OpenConnect compatibility API.' >&2; exit 1
+fi
 cmake --build "$build_dir" -j 6
 ctest --test-dir "$build_dir" --output-on-failure
 mkdir -p "$dist_dir"
@@ -34,6 +41,8 @@ ditto --norsrc --noextattr --noqtn --noacl "$build_dir/bin/OpenConnect-GUI-KillS
 cp -X "$(brew --prefix ca-certificates)/share/ca-certificates/cacert.pem" "$app/Contents/Resources/ca-bundle.crt"
 mkdir -p "$app/Contents/Resources/licenses"
 cp -X "$project_dir/docs/third-party/pfctl-rs-MIT.txt" "$app/Contents/Resources/licenses/"
+cp -X "$project_dir/docs/third-party/openconnect-LGPL-2.1.txt" "$app/Contents/Resources/licenses/"
+cp -X "$project_dir/patches/openconnect-9.21-tls12-policy.patch" "$app/Contents/Resources/licenses/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $release_version" "$app/Contents/Info.plist"
 macdeployqt "$app" -verbose=1 -libpath="$(brew --prefix qtsvg)/lib"
 codesign --force --deep --sign - "$app"
@@ -54,4 +63,5 @@ image="$dist_dir/OpenConnect-GUI-KillSwitch-$(uname -m)-v$release_version.dmg"
 hdiutil create -ov -volname 'OpenConnect Kill Switch' -srcfolder "$stage" \
     -format UDZO "$image"
 (cd "$dist_dir" && shasum -a 256 "$(basename "$image")") > "$image.sha256"
+python3 "$project_dir/scripts/package-openconnect-source.py"
 printf '\nCreated: %s\n' "$image"

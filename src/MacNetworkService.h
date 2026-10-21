@@ -33,6 +33,7 @@ public:
     void stats(const oc_stats*, const QString&) override;
     void error(const QString&) override;
     void firewallError(const QString&) override;
+    void progress(int, const QString&) override;
 signals:
     void notification(const QJsonObject& event);
 protected:
@@ -44,7 +45,8 @@ private:
     QWaitCondition m_answerReady;
     QString m_challenge, m_answer;
     bool m_answered = false, m_accepted = false;
-    bool m_reportedError = false;
+    std::atomic<bool> m_reportedError{false}, m_connected{false};
+    QTimer m_connectDeadline;
     int m_fd = -1;
     std::atomic<bool> m_cancelled{false};
 };

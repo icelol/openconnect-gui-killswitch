@@ -51,6 +51,13 @@ set(SIGN_EXE "false" CACHE STRING "When set to true the executable will be signe
 
 include(ProjectSettings)
 include(ProjectDependencies)
+include(CheckCXXSymbolExists)
+set(CMAKE_REQUIRED_INCLUDES ${OPENCONNECT_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_LIBRARIES ${OPENCONNECT_LINK_LIBRARIES})
+unset(OCGUI_HAVE_TLS12_API CACHE)
+check_cxx_symbol_exists(openconnect_set_tls12_only "openconnect.h" OCGUI_HAVE_TLS12_API)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_LIBRARIES)
 
 if(MINGW)
     # FIXME: upgrading CMake from 3.15 to newer version fails on packaging

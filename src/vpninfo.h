@@ -67,8 +67,11 @@ public:
     void notifyFirewallError(const QString& error);
     void notifyStats(const struct oc_stats* stats, const QString& dtls);
     void notifyConnected(QString& dns, QString& ip, QString& ip6, QString& cstp, QString& dtls);
+    void recordProgress(int level, const QString& message);
+    bool authFormSeen = false;
 
 private:
     void initialize(QString name, StoredServer* ss, MainWindow* m, VpnCallbacks* callbacks);
     SOCKET cmd_fd;
+    QString m_lastProgressError;
 };

@@ -170,6 +170,8 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     ui->minimizeBox->setChecked(ss->get_minimize());
     ui->useProxyBox->setChecked(ss->get_proxy());
     ui->disableUdpBox->setChecked(ss->get_disable_udp());
+    ui->tls12OnlyBox->setChecked(ss->get_tls12_only());
+    ui->legacyAuthBox->setChecked(ss->get_legacy_auth());
     ui->reconnectTimeoutSpinBox->setValue(ss->get_reconnect_timeout());
     ui->dtlsAttemptPeriodSpinBox->setValue(ss->get_dtls_reconnect_timeout());
 
@@ -273,6 +275,8 @@ void EditDialog::on_buttonBox_accepted()
     ss->set_minimize(ui->minimizeBox->isChecked());
     ss->set_proxy(ui->useProxyBox->isChecked());
     ss->set_disable_udp(ui->disableUdpBox->isChecked());
+    ss->set_tls12_only(ui->tls12OnlyBox->isChecked());
+    ss->set_legacy_auth(ui->legacyAuthBox->isChecked());
     ss->set_reconnect_timeout(ui->reconnectTimeoutSpinBox->value());
     ss->set_dtls_reconnect_timeout(ui->dtlsAttemptPeriodSpinBox->value());
 

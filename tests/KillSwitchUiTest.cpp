@@ -5,6 +5,8 @@
 #include "dialog/mainwindow.h"
 #include "dialog/MyInputDialog.h"
 #include "FileLogger.h"
+#include "server_storage.h"
+#include "VpnProgress.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
@@ -64,6 +66,8 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
         OcSettings settings;
+        QCOMPARE(settings.format(), QSettings::IniFormat);
+        QVERIFY(settings.fileName().startsWith(settingsDirectory.path() + '/'));
         settings.setValue("server:Example VPN/server", "https://vpn.example.test");
         settings.setValue("server:Example VPN/protocol-name", "anyconnect");
     }
@@ -285,6 +289,8 @@ private slots:
         for (const auto& params : {QJsonObject{{"gateway", "https://user:password@203.0.113.10"}},
                 QJsonObject{{"gateway", "https://203.0.113.10"}, {"vpncScript", "/tmp/do-not-execute"}},
                 QJsonObject{{"gateway", "https://203.0.113.10"}, {"protocol", "unknown-protocol"}},
+                QJsonObject{{"gateway", "https://203.0.113.10"}, {"tls12Only", "not-a-boolean"}},
+                QJsonObject{{"gateway", "https://203.0.113.10"}, {"legacyAuth", "not-a-boolean"}},
                 QJsonObject{{"gateway", "https://203.0.113.10"}, {"proxy", true}}}) {
             rejected.clear();
             client.request("connect", params, [&](const QJsonObject&, const QString& e) { rejected = e; });
@@ -314,10 +320,11 @@ private slots:
         openconnect_free_supported_protocols(protocols);
         for (const auto& protocol : supported) {
             bool replied = false; QString failure;
-            client.request("connect", {{"gateway", "https://another.example.test:8443/group"}, {"protocol", protocol}},
+            client.request("connect", {{"gateway", "https://another.example.test:8443/group"}, {"protocol", protocol}, {"tls12Only", true}},
                 [&](const QJsonObject&, const QString& e) { failure = e; replied = true; });
             QTRY_VERIFY(replied); QVERIFY2(failure.isEmpty(), qPrintable(failure));
             QCOMPARE(service.m_pendingProfile.value("protocol").toString(), protocol);
+            QVERIFY(service.m_pendingProfile.value("tls12Only").toBool());
             QVERIFY(guard.isArmed());
             replied = false;
             client.request("disconnect", {}, [&](const QJsonObject&, const QString&) { replied = true; });
@@ -431,6 +438,84 @@ private slots:
         QVERIFY(session.answer(challenge, false, {}));
         QTRY_VERIFY(pending.isFinished()); QVERIFY(!pending.result());
         QVERIFY(pf.installed.isEmpty());
+    }
+
+    void profileTlsCompatibilityIsOptionalAndStoredPerProfile()
+    {
+        StoredServer profile;
+        QVERIFY(!profile.get_tls12_only());
+        QVERIFY(!profile.get_legacy_auth());
+        profile.set_label("TLS profile regression");
+        profile.set_server_gateway("https://vpn.example.test");
+        profile.set_protocol_name("anyconnect");
+        profile.set_tls12_only(true); profile.set_legacy_auth(true); profile.save();
+        QString name = "TLS profile regression";
+        StoredServer loaded; QVERIFY(loaded.load(name));
+        QVERIFY(loaded.get_tls12_only());
+        QVERIFY(loaded.get_legacy_auth());
+        StoredServer independent; QVERIFY(!independent.get_tls12_only());
+    }
+
+    void serviceProgressOmitsAuthenticationSecretsAndReachesGuiLog()
+    {
+        QTemporaryDir directory; Firewall pf;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        ServiceVpnSession session(&guard, {});
+        QSignalSpy events(&session, &ServiceVpnSession::notification);
+        for (const auto& value : {"Cookie: sensitive-test-value", "Authorization: Bearer sensitive-test-value", "Password=sensitive-test-value"})
+            session.progress(PRG_INFO, value);
+        QCOMPARE(events.count(), 0);
+        session.progress(PRG_DEBUG, "not forwarded"); QCOMPARE(events.count(), 0);
+        session.progress(PRG_INFO, "TLS negotiation in progress"); QCOMPARE(events.count(), 1);
+        QCOMPARE(events.last().first().toJsonObject().value("message").toString(), QString("TLS negotiation in progress"));
+        QVERIFY(!safeVpnProgress("https://vpn.example.test/?session=sensitive-test-value").contains("sensitive-test-value"));
+        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        QString error; QVERIFY(service.start(error));
+        service.m_monitor.stop(); service.m_busy = true; // Hold before real worker/network.
+        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client);
+        window.show(); QTRY_VERIFY(client->available());
+        client->request("connect", {{"gateway", "https://vpn.example.test"}, {"protocol", "anyconnect"}});
+        QTRY_VERIFY(!service.m_pendingProfile.isEmpty());
+        service.sessionEvent(events.last().first().toJsonObject());
+        auto logged = [] {
+            for (const auto& entry : Logger::instance().getMessages())
+                if (entry.text == "TLS negotiation in progress") return true;
+            return false;
+        };
+        QTRY_VERIFY(logged());
+    }
+
+    void stalledPreLoginConnectionProducesAnErrorInsteadOfInfiniteCancel()
+    {
+        QTemporaryDir directory; Firewall pf;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        ServiceVpnSession session(&guard, {});
+        QSignalSpy events(&session, &ServiceVpnSession::notification);
+        auto deadline = session.findChild<QTimer*>("vpnConnectDeadline"); QVERIFY(deadline);
+        deadline->start(20);
+        QTRY_VERIFY(!events.isEmpty());
+        QCOMPARE(events.last().first().toJsonObject().value("event").toString(), QString("error"));
+        QVERIFY(events.last().first().toJsonObject().value("message").toString().contains("timed out"));
+    }
+
+    void connectionDeadlineDoesNotCancelAnOpenPasswordPrompt()
+    {
+        QTemporaryDir directory; Firewall pf;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        ServiceVpnSession session(&guard, {});
+        QSignalSpy events(&session, &ServiceVpnSession::notification);
+        auto pending = QtConcurrent::run([&] { QString answer; return session.input("Password", "Password", {}, true, {}, {}, answer); });
+        QTRY_VERIFY(session.awaitingInput());
+        QTRY_VERIFY(!events.isEmpty());
+        const auto challenge = events.first().first().toJsonObject().value("challenge").toString();
+        auto deadline = session.findChild<QTimer*>("vpnConnectDeadline"); QVERIFY(deadline);
+        deadline->start(20);
+        QTest::qWait(50);
+        QVERIFY(!pending.isFinished());
+        for (const auto& event : events) QVERIFY(event.first().toJsonObject().value("event").toString() != "error");
+        QVERIFY(session.answer(challenge, false, {}));
+        QTRY_VERIFY(pending.isFinished()); QVERIFY(!pending.result());
     }
 };
 
