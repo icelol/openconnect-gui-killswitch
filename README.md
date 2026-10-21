@@ -1,6 +1,10 @@
 # OpenConnect GUI + Kill Switch
 
-**1.1.3 adds a service health indicator.** Authenticated status is checked every
+**1.2.0 adds a native Windows x64 client:** LocalSystem service, WFP kill switch,
+Wintun and a self-contained installer. macOS keeps its PF backend and the same
+independent switch. [Windows guide](docs/windows.md) · [Руководство Windows](docs/windows.ru.md).
+
+**Service health is visible in the GUI.** Authenticated status is checked every
 two seconds; the indicator shows the runtime version and response latency.
 Service availability, firewall state, and the VPN connection phase are separate.
 The **Service diagnostics** button (shown as **«Диагностика службы»**) reads PF
