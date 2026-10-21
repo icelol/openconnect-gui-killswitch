@@ -58,13 +58,14 @@ print('PASS: recursively staged', len(seen), 'native PE files')
 # Keep their exact versions and hashes so source/build provenance is reviewable.
 if '--dependencies' in sys.argv:
     import json
-    packages={}
+    packages={}; originals=[]
     for binary in sorted(stage.rglob('*.dll')):
         original=next((p for folder in search for p in folder.glob('*') if p.name.lower()==binary.name.lower()),None)
         if original is None or prefix not in original.parents:continue
-        posix=subprocess.check_output(['cygpath','-u',str(original)],text=True).strip()
-        package=subprocess.check_output(['pacman','-Qoq',posix],text=True).strip()
-        if package in packages:continue
+        originals.append(str(original))
+    # Batch package ownership lookup; spawning MSYS2 processes per DLL is slow.
+    package_names=set(subprocess.check_output(['pacman','-Qoq',*originals],text=True).splitlines())
+    for package in sorted(package_names):
         version=subprocess.check_output(['pacman','-Q',package],text=True).strip()
         metadata=subprocess.check_output(['pacman','-Qi',package],text=True)
         files=subprocess.check_output(['pacman','-Qlq',package],text=True).splitlines()

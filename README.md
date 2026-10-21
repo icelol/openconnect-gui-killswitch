@@ -8,12 +8,16 @@ rules locally without a Terminal or another administrator prompt. Errors leave
 network controls accessible. Server contact, authentication replies, and tunnel
 setup use separate 30/90/60-second deadlines; each input prompt allows 120 seconds.
 
-**A macOS OpenConnect client with a system-wide kill switch, independent of Connect and Disconnect.**
+**An OpenConnect client with a system-wide kill switch, independent of Connect and Disconnect.**
 
 [Русская версия](README.ru.md) · [Releases](https://github.com/icelol/openconnect-gui-killswitch/releases) · [Architecture](docs/macos-killswitch.md)
 
 Choose your own VPN server and an OpenConnect protocol. No organization, account,
 server address, internal Git remote or credentials are bundled or preconfigured.
+
+The **Windows x64** client uses a LocalSystem service, WFP and Wintun. See the
+[Windows installation, recovery and verification guide](docs/windows.md).
+The macOS package and PF backend are described below.
 
 ## Features
 

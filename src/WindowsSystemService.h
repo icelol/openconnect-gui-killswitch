@@ -2,8 +2,8 @@
 #pragma once
 #include <QJsonObject>
 #include <QString>
-#include <functional>
 #include <QtGlobal>
+#include <functional>
 
 namespace WindowsSystemService {
 QString directory();

@@ -41,8 +41,13 @@ Section "OpenConnect and system protection" Main
   fresh:
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*"
-  nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --install-service'
+  nsExec::ExecToStack '"$INSTDIR\openconnect-gui.exe" --install-service'
   Pop $0
+  Pop $2
+  DetailPrint $2
+  FileOpen $3 "$INSTDIR\installer.log" a
+  FileWrite $3 "Service installation: exit=$0$\r$\n$2$\r$\n"
+  FileClose $3
   ${If} $0 != 0
     MessageBox MB_ICONSTOP "The OpenConnect service could not be installed. See the installation details." /SD IDOK
     SetErrorLevel 1

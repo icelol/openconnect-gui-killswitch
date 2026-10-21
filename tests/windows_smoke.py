@@ -26,7 +26,7 @@ data = pathlib.Path(os.environ['ProgramData'])/'OpenConnect-GUI-KillSwitch'
 def run(*args, timeout=35):
     result = subprocess.run([str(x) for x in args], capture_output=True, text=True, errors='replace', timeout=timeout)
     if result.returncode:
-        raise AssertionError('Command failed: '+pathlib.Path(str(args[0])).name+' '+str(args[1:])+'\n'+result.stdout[-3000:]+'\n'+result.stderr[-3000:])
+        raise AssertionError('Command failed ('+str(result.returncode)+'): '+pathlib.Path(str(args[0])).name+' '+str(args[1:])+'\n'+result.stdout[-3000:]+'\n'+result.stderr[-3000:])
     return result.stdout
 
 if '--watchdog' in sys.argv:
@@ -223,12 +223,26 @@ try:
     report['unrelated_firewall_rule']='retained'
     report['uninstall_and_recovery']='passed'
     marker.write_text('complete')
+except BaseException:
+    # This runs only in a disposable CI account. Print bounded service/ACL
+    # diagnostics without credentials, HTTP bodies or the fixture private key.
+    for args in [('sc.exe','query','OpenConnectKillSwitch'),('icacls.exe',str(runtime.parent)),
+                 (str(runtime),'--install-service')]:
+        try:
+            result=subprocess.run(args,capture_output=True,text=True,errors='replace',timeout=20)
+            print('CI diagnosis:',pathlib.Path(args[0]).name,result.returncode,result.stdout[-4000:],result.stderr[-4000:])
+        except (OSError,subprocess.TimeoutExpired) as error:print(type(error).__name__)
+    if (data/'service.log').exists():print((data/'service.log').read_text(errors='replace')[-5000:])
+    raise
 finally:
     if fixture:fixture.close()
     if existing:existing.close()
     if pipe:pipe.close()
     if runtime.exists():
+        if (runtime.parent/'installer.log').exists():
+            shutil.copy2(runtime.parent/'installer.log',root/'dist/windows-installer.log')
         try:run(runtime,'--recover-killswitch',timeout=45)
+        except (AssertionError,subprocess.TimeoutExpired) as error:print('Recovery diagnosis:',str(error))
         finally:
             if (data/'service.log').exists():shutil.copy2(data/'service.log',root/'dist/windows-service.log')
     marker.write_text('finished')

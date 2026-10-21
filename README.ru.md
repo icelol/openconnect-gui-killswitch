@@ -34,12 +34,16 @@ PF может оставаться включённым для других пр
 используйте `Recover Kill Switch.command` из DMG с локальным подтверждением
 пароля администратора.
 
-**Клиент OpenConnect для macOS с системным kill switch, независимым от Connect и Disconnect.**
+**Клиент OpenConnect с системным kill switch, независимым от Connect и Disconnect.**
 
 [English](README.md) · [Релизы](https://github.com/icelol/openconnect-gui-killswitch/releases) · [Архитектура](docs/macos-killswitch.md)
 
 Укажите собственный VPN-сервер и протокол. В приложении нет заранее настроенной
 организации, учётной записи, адреса сервера, внутреннего Git-сервера или паролей.
+
+Версия **Windows x64** использует службу LocalSystem, WFP и Wintun.
+[Установка, восстановление и проверки Windows](docs/windows.ru.md).
+Ниже описаны сборка macOS и её механизм PF.
 
 ## Возможности
 
