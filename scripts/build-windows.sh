@@ -7,7 +7,7 @@ cd "$project_dir"
 sh scripts/build-openconnect.sh
 export PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DOCGUI_SYSTEM_DEPS=ON -DBUILD_TESTING=ON
-cmake --build build -j 4
+cmake --build build -j 4 -- -k 0
 ctest --test-dir build --output-on-failure
 stage="$project_dir/dist/windows-stage"
 if [ -d "$stage" ]; then rm -rf "$stage"; fi

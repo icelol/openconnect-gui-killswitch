@@ -151,7 +151,7 @@ else()
     )
 endif()
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} fwpuclnt iphlpapi advapi32 secur32 wtsapi32 ws2_32 ole32 uuid rpcrt4)
+    target_link_libraries(${PROJECT_NAME} fwpuclnt iphlpapi advapi32 secur32 wtsapi32 ws2_32 ole32 shell32 uuid rpcrt4)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 endif()
 

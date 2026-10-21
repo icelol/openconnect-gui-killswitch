@@ -46,3 +46,4 @@ jobs:
             dist/windows-service.log
             build/Testing/Temporary/LastTest.log
             build/deps/source/openconnect-9.21/config.log
+            build/CMakeFiles/CMakeConfigureLog.yaml

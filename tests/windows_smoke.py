@@ -7,10 +7,12 @@ started before ON. It uses the installed runtime's owned-provider recovery.
 import ctypes
 from ctypes import wintypes
 import json
+import http.client
 import os
 import pathlib
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -90,11 +92,22 @@ def external(ip='1.1.1.1', port=443):
         with socket.create_connection((ip,port),timeout=2):return True
     except OSError:return False
 
+def udp_dns():
+    # Public, fixed probe with no local hostnames or search suffixes.
+    question=b'\x45\x71\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x03one\x03one\x03one\x03one\x00\x00\x01\x00\x01'
+    try:
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
+            probe.settimeout(2);probe.sendto(question,('1.1.1.1',53))
+            reply,peer=probe.recvfrom(2048)
+            return peer==('1.1.1.1',53) and reply[:2]==question[:2] and len(reply)>=12
+    except OSError:return False
+
 installer=next((root/'dist').glob('*Setup-windows-x64-*.exe'))
 report={'platform':sys.getwindowsversion().build,'version':(root/'VERSION').read_text().strip()}
 marker=root/'dist/windows-watchdog-finished'
 marker.unlink(missing_ok=True)
-watchdog=None;pipe=None
+watchdog=None;pipe=None;existing=None
+foreign='OpenConnect-CI-Unrelated-Policy-78196d3a'
 try:
     run(installer,'/S',timeout=90)
     run(runtime,'--service-ready') # Production client verifies SCM identity, not just a pipe name.
@@ -110,17 +123,33 @@ try:
     time.sleep(3);assert gui.poll() is None,'Installed GUI exited at startup'
     gui.terminate();gui.wait(10)
     report['packaged_gui_startup']='passed'
+    run('powershell.exe','-NoProfile','-NonInteractive','-Command',
+        "New-NetFirewallRule -Name '"+foreign+"' -DisplayName 'Unrelated CI rule' -Direction Outbound -Action Block -Protocol TCP -RemoteAddress 192.0.2.123 | Out-Null")
     assert external(), 'External baseline is unavailable'
     ipv6=external('2606:4700:4700::1111')
+    udp=udp_dns()
+    existing=http.client.HTTPSConnection('1.1.1.1',timeout=3,context=ssl.create_default_context())
+    existing.request('GET','/cdn-cgi/trace',headers={'Connection':'keep-alive'})
+    reply=existing.getresponse();assert reply.status==200;reply.read()
+    assert existing.sock is not None,'Persistent TCP baseline is unavailable'
     watchdog=subprocess.Popen([sys.executable,__file__,'--watchdog',str(marker)])
     pipe.request('firewall',{'enabled':True,'gateway':'https://1.1.1.1'})
     pipe.settled(True)
     assert not external(), 'IPv4 traffic escaped enabled protection'
     if ipv6: assert not external('2606:4700:4700::1111'),'IPv6 traffic escaped enabled protection'
+    if udp: assert not udp_dns(),'UDP escaped enabled protection'
+    try:
+        existing.request('GET','/cdn-cgi/trace',headers={'Connection':'keep-alive'})
+        reply=existing.getresponse();reply.read();escaped=True
+    except (OSError,http.client.HTTPException):escaped=False
+    assert not escaped,'An existing TCP flow escaped reauthorization'
+    existing.close();existing=None
     diag=pipe.request('diagnostics')
     assert diag['persistentBlockLayers']==4 and diag['ownedFilterCount']>=21,diag
     report['wfp_ipv4']='blocked'
     report['wfp_ipv6']='blocked' if ipv6 else 'baseline unavailable on hosted runner'
+    report['wfp_udp']='blocked' if udp else 'baseline unavailable on hosted runner'
+    report['existing_tcp_flow']='blocked after policy change'
     report['wfp_filter_policy']=diag
     # Connect must still be accepted; an unreachable test gateway can be canceled.
     pipe.request('connect',{'gateway':'https://192.0.2.1','protocol':'anyconnect'})
@@ -152,9 +181,13 @@ try:
     run(uninstall,'/S','_?='+str(runtime.parent),timeout=60)
     assert not (data/'state.json').exists(),'Uninstall left service state'
     assert external(),'Uninstall did not leave network available'
+    run('powershell.exe','-NoProfile','-NonInteractive','-Command',
+        "if (!(Get-NetFirewallRule -Name '"+foreign+"' -ErrorAction Stop)) { exit 1 }")
+    report['unrelated_firewall_rule']='retained'
     report['uninstall_and_recovery']='passed'
     marker.write_text('complete')
 finally:
+    if existing:existing.close()
     if pipe:pipe.close()
     if runtime.exists():
         try:run(runtime,'--recover-killswitch',timeout=45)
@@ -162,5 +195,7 @@ finally:
             if (data/'service.log').exists():shutil.copy2(data/'service.log',root/'dist/windows-service.log')
     marker.write_text('finished')
     if watchdog:watchdog.wait(5)
+    subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',
+        "Remove-NetFirewallRule -Name '"+foreign+"' -ErrorAction SilentlyContinue"],capture_output=True,timeout=15)
     (root/'dist/windows-verification.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

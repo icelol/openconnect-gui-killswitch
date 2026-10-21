@@ -13,11 +13,14 @@
 #include <QNetworkInterface>
 #include <QSaveFile>
 #include <QSet>
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <fwpmu.h>
+#include "WindowsWfpConstants.h"
 #include <iphlpapi.h>
 #include <netioapi.h>
 #include <sddl.h>
@@ -44,7 +47,7 @@ struct Blob {
 struct SystemAccess {
     PSECURITY_DESCRIPTOR descriptor=nullptr;
     FWP_BYTE_BLOB blob{};
-    SystemAccess(){if(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(A;;GA;;;SY)",SDDL_REVISION_1,&descriptor,nullptr)){
+    SystemAccess(){if(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(A;;0x00000001;;;SY)",SDDL_REVISION_1,&descriptor,nullptr)){
         blob.size=GetSecurityDescriptorLength(descriptor);blob.data=static_cast<UINT8*>(descriptor);}}
     ~SystemAccess(){if(descriptor)LocalFree(descriptor);}
 };

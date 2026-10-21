@@ -8,7 +8,9 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QThread>
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <sddl.h>
 #include <aclapi.h>

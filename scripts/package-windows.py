@@ -53,3 +53,32 @@ while pending:
         target = stage / name
         shutil.copy2(source, target); pending.append(target)
 print('PASS: recursively staged', len(seen), 'native PE files')
+
+# Preserve licenses from the packages that actually supplied bundled DLLs.
+# Keep their exact versions and hashes so source/build provenance is reviewable.
+if '--dependencies' in sys.argv:
+    import json
+    packages={}
+    for binary in sorted(stage.rglob('*.dll')):
+        original=next((p for folder in search for p in folder.glob('*') if p.name.lower()==binary.name.lower()),None)
+        if original is None or prefix not in original.parents:continue
+        posix=subprocess.check_output(['cygpath','-u',str(original)],text=True).strip()
+        package=subprocess.check_output(['pacman','-Qoq',posix],text=True).strip()
+        if package in packages:continue
+        version=subprocess.check_output(['pacman','-Q',package],text=True).strip()
+        metadata=subprocess.check_output(['pacman','-Qi',package],text=True)
+        files=subprocess.check_output(['pacman','-Qlq',package],text=True).splitlines()
+        destination=stage/'licenses'/package;destination.mkdir(parents=True,exist_ok=True)
+        (destination/'PACKAGE.txt').write_text(metadata,encoding='utf-8')
+        for value in files:
+            if '/share/licenses/' not in value or value.endswith('/'):continue
+            source=pathlib.Path(subprocess.check_output(['cygpath','-w',value],text=True).strip())
+            if source.is_file():
+                relative=pathlib.PurePosixPath(value.split('/share/licenses/',1)[1])
+                target=destination/pathlib.Path(*relative.parts);target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(source,target)
+        packages[package]={'version':version,'metadata':'licenses/'+package+'/PACKAGE.txt',
+            'recipe':'https://github.com/msys2/MINGW-packages','package':'https://packages.msys2.org/package/'+package}
+    provenance={'packages':packages,'files':{str(p.relative_to(stage)):hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(stage.rglob('*')) if p.suffix.lower() in ('.exe','.dll')}}
+    (stage/'DEPENDENCIES.json').write_text(json.dumps(provenance,indent=2)+'\n',encoding='utf-8')
