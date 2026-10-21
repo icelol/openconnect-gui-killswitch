@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // TLS + auth-form inspection only: no credentials, cookies, tunnel or PF writes.
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "config.h"
 #include "VpnProgress.h"
 #include <QCoreApplication>
@@ -25,7 +25,7 @@ static int resolve(void* data, const char* node, const char* service,
 {
     auto probe = static_cast<Probe*>(data);
     probe->resolverUsed = true;
-    return MacKillSwitch::resolvePinned(probe->host, probe->addresses, node, service, hints, result);
+    return NetworkGuard::resolvePinned(probe->host, probe->addresses, node, service, hints, result);
 }
 
 static int certificate(void* data, const char*)

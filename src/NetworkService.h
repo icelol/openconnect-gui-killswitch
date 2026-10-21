@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "VpnCallbacks.h"
 #include <QFuture>
 #include <QElapsedTimer>
@@ -15,6 +15,11 @@
 #include <memory>
 class QLockFile;
 class VpnInfo;
+#ifdef Q_OS_WIN
+using NetworkServiceIdentity = QString;
+#else
+using NetworkServiceIdentity = uint;
+#endif
 
 QString networkServiceSocket();
 int runNetworkService(int argc, char** argv);
@@ -22,7 +27,7 @@ int runNetworkService(int argc, char** argv);
 class ServiceVpnSession : public QThread, public VpnCallbacks {
     Q_OBJECT
 public:
-    ServiceVpnSession(MacKillSwitch* guard, const QJsonObject& profile, QObject* parent = nullptr);
+    ServiceVpnSession(NetworkGuard* guard, const QJsonObject& profile, QObject* parent = nullptr);
     ~ServiceVpnSession() override;
     void cancel();
     void requestStats();
@@ -41,7 +46,7 @@ signals:
 protected:
     void run() override;
 private:
-    MacKillSwitch* m_guard;
+    NetworkGuard* m_guard;
     QJsonObject m_profile;
     mutable QMutex m_lock;
     QWaitCondition m_answerReady;
@@ -54,12 +59,12 @@ private:
     std::atomic<bool> m_cancelled{false};
 };
 
-class MacNetworkService : public QObject {
+class NetworkService : public QObject {
     Q_OBJECT
 public:
-    MacNetworkService(MacKillSwitch* guard, uint allowedUid, const QString& socket,
+    NetworkService(NetworkGuard* guard, NetworkServiceIdentity allowedUser, const QString& socket,
         const QString& initialGateway = {}, QObject* parent = nullptr);
-    ~MacNetworkService() override;
+    ~NetworkService() override;
     bool start(QString& error, const QString& recoveryError = {});
     QJsonObject status() const;
     static bool validGateway(const QString& candidate, QString& error);
@@ -76,8 +81,8 @@ private:
     void changeFirewall();
     void startVpn();
     void sessionEvent(const QJsonObject&);
-    MacKillSwitch* m_guard;
-    uint m_allowedUid;
+    NetworkGuard* m_guard;
+    NetworkServiceIdentity m_allowedUser;
     QString m_socketPath;
     QLocalServer m_server;
     std::unique_ptr<QLockFile> m_instance;

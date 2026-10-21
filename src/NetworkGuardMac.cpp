@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "MacDnsBootstrap.h"
 #include "MacPfStates.h"
 
@@ -34,7 +34,7 @@
 #endif
 
 namespace {
-MacKillSwitch::Result executePf(const QStringList& args, const QByteArray& input)
+NetworkGuard::Result executePf(const QStringList& args, const QByteArray& input)
 {
     QProcess process;
     auto environment = QProcessEnvironment::systemEnvironment();
@@ -148,7 +148,7 @@ bool configuredTunnel(const QString& name, const QString& ipv4, const QString& i
 }
 }
 
-MacKillSwitch::MacKillSwitch(Runner runner, QString statePath, QString bootPath, StatePruner statePruner,
+NetworkGuard::NetworkGuard(Runner runner, QString statePath, QString bootPath, StatePruner statePruner,
     DnsLookup dnsLookup, QStringList dnsServers)
     : m_runner(runner ? runner : Runner(executePf))
     , m_statePruner(statePruner ? std::move(statePruner) : runner
@@ -164,18 +164,20 @@ MacKillSwitch::MacKillSwitch(Runner runner, QString statePath, QString bootPath,
 {
 }
 
-QString MacKillSwitch::anchor()
+QString NetworkGuard::anchor()
 {
     // Runs before Apple's alphabetically named dynamic child anchors.
     return QStringLiteral("com.apple/000.openconnect-gui-killswitch");
 }
 
-MacKillSwitch::Result MacKillSwitch::run(const QStringList& args, const QByteArray& input)
+NetworkGuard::~NetworkGuard() = default;
+
+NetworkGuard::Result NetworkGuard::run(const QStringList& args, const QByteArray& input)
 {
     return m_runner(args, input);
 }
 
-std::unique_ptr<QLockFile> MacKillSwitch::transaction(QString& error) const
+std::unique_ptr<QLockFile> NetworkGuard::transaction(QString& error) const
 {
     if (!stateDirectory(m_statePath, error))
         return {};
@@ -188,7 +190,7 @@ std::unique_ptr<QLockFile> MacKillSwitch::transaction(QString& error) const
     return lock;
 }
 
-QString MacKillSwitch::rules(const Policy& policy, QString& error)
+QString NetworkGuard::rules(const Policy& policy, QString& error)
 {
     error.clear();
     if (policy.host.isEmpty() || policy.port == 0) {
@@ -271,7 +273,7 @@ QString MacKillSwitch::rules(const Policy& policy, QString& error)
     return text;
 }
 
-QString MacKillSwitch::filterRules(const QString& text)
+QString NetworkGuard::filterRules(const QString& text)
 {
     QStringList result;
     for (const auto& line : text.split('\n')) {
@@ -282,7 +284,7 @@ QString MacKillSwitch::filterRules(const QString& text)
     return result.join('\n');
 }
 
-bool MacKillSwitch::validateEnvironment(const QString& rootRules,
+bool NetworkGuard::validateEnvironment(const QString& rootRules,
     const QString& childAnchors, const QString& interfaces, QString& error)
 {
     error.clear();
@@ -335,7 +337,7 @@ bool MacKillSwitch::validateEnvironment(const QString& rootRules,
     return true;
 }
 
-bool MacKillSwitch::checkEnvironment(QString& error)
+bool NetworkGuard::checkEnvironment(QString& error)
 {
     const auto root = run({"-sr"});
     const auto children = run({"-a", "com.apple", "-s", "Anchors"});
@@ -362,7 +364,7 @@ bool MacKillSwitch::checkEnvironment(QString& error)
     return true;
 }
 
-bool MacKillSwitch::readBootPolicy(const QString& path, Policy& policy, bool& enabled, QString& error)
+bool NetworkGuard::readBootPolicy(const QString& path, Policy& policy, bool& enabled, QString& error)
 {
     error.clear();
     if (!stateDirectory(path, error))
@@ -396,7 +398,7 @@ bool MacKillSwitch::readBootPolicy(const QString& path, Policy& policy, bool& en
     return !rules(policy, error).isEmpty();
 }
 
-bool MacKillSwitch::writeBootPolicy(const QString& path, const Policy& policy, bool enabled, QString& error)
+bool NetworkGuard::writeBootPolicy(const QString& path, const Policy& policy, bool enabled, QString& error)
 {
     error.clear();
     if ((enabled || !policy.addresses.isEmpty()) && rules(policy, error).isEmpty())
@@ -415,7 +417,7 @@ bool MacKillSwitch::writeBootPolicy(const QString& path, const Policy& policy, b
     return savePrivateJson(path, object, error);
 }
 
-bool MacKillSwitch::save(QString& error)
+bool NetworkGuard::save(QString& error)
 {
     if (!stateDirectory(m_statePath, error))
         return false;
@@ -433,7 +435,7 @@ bool MacKillSwitch::save(QString& error)
     return savePrivateJson(m_statePath, object, error);
 }
 
-bool MacKillSwitch::load(QString& error)
+bool NetworkGuard::load(QString& error)
 {
     if (!QFileInfo::exists(m_statePath))
         return true;
@@ -475,7 +477,7 @@ bool MacKillSwitch::load(QString& error)
     return true;
 }
 
-bool MacKillSwitch::restore(QString& error)
+bool NetworkGuard::restore(QString& error)
 {
     QMutexLocker lock(&m_mutex);
     auto processLock = transaction(error);
@@ -503,7 +505,7 @@ bool MacKillSwitch::restore(QString& error)
     return apply(next, true, error);
 }
 
-bool MacKillSwitch::restoreBootProtection(QString& error)
+bool NetworkGuard::restoreBootProtection(QString& error)
 {
     QMutexLocker lock(&m_mutex);
     auto processLock = transaction(error);
@@ -528,7 +530,7 @@ bool MacKillSwitch::restoreBootProtection(QString& error)
     return apply(policy, true, error);
 }
 
-bool MacKillSwitch::apply(const Policy& next, bool flushStates, QString& error)
+bool NetworkGuard::apply(const Policy& next, bool flushStates, QString& error)
 {
     Q_UNUSED(flushStates);
     const bool trustedGatewayStates = m_armed && m_statesCleared
@@ -582,7 +584,7 @@ bool MacKillSwitch::apply(const Policy& next, bool flushStates, QString& error)
     return verifyUnlocked(error);
 }
 
-QString MacKillSwitch::dnsBootstrapRules(const Policy& policy, const QStringList& servers, QString& error)
+QString NetworkGuard::dnsBootstrapRules(const Policy& policy, const QStringList& servers, QString& error)
 {
     const auto base = rules(policy, error);
     if (base.isEmpty() || servers.size() > 8) return {};
@@ -598,7 +600,7 @@ QString MacKillSwitch::dnsBootstrapRules(const Policy& policy, const QStringList
     return temporary + base;
 }
 
-bool MacKillSwitch::arm(const QUrl& gateway, QString& error)
+bool NetworkGuard::arm(const QUrl& gateway, QString& error)
 {
     error.clear();
     QMutexLocker lock(&m_mutex);
@@ -642,7 +644,7 @@ bool MacKillSwitch::arm(const QUrl& gateway, QString& error)
     return next.addresses.isEmpty() ? true : apply(next, true, error);
 }
 
-QStringList MacKillSwitch::lookupGatewayUnlocked(const QString& host, QString& error)
+QStringList NetworkGuard::lookupGatewayUnlocked(const QString& host, QString& error)
 {
     const auto servers = m_dnsServers.isEmpty() ? MacDnsBootstrap::systemServers() : m_dnsServers;
     if (servers.isEmpty()) return {};
@@ -667,17 +669,17 @@ QStringList MacKillSwitch::lookupGatewayUnlocked(const QString& host, QString& e
     return addresses;
 }
 
-void MacKillSwitch::requestEnabled(bool enabled)
+void NetworkGuard::requestEnabled(bool enabled)
 {
     m_requested = enabled;
 }
 
-bool MacKillSwitch::isRequested() const
+bool NetworkGuard::isRequested() const
 {
     return m_requested;
 }
 
-bool MacKillSwitch::prepareConnection(const QUrl& gateway, QString& error)
+bool NetworkGuard::prepareConnection(const QUrl& gateway, QString& error)
 {
     {
         QMutexLocker lock(&m_mutex);
@@ -687,7 +689,7 @@ bool MacKillSwitch::prepareConnection(const QUrl& gateway, QString& error)
     return arm(gateway, error);
 }
 
-bool MacKillSwitch::armPinned(const Policy& policy, QString& error)
+bool NetworkGuard::armPinned(const Policy& policy, QString& error)
 {
     error.clear();
     QMutexLocker lock(&m_mutex);
@@ -710,7 +712,7 @@ bool MacKillSwitch::armPinned(const Policy& policy, QString& error)
     return apply(next, true, error);
 }
 
-bool MacKillSwitch::attachTunnel(const QString& name, const QString& ipv4,
+bool NetworkGuard::attachTunnel(const QString& name, const QString& ipv4,
     const QString& ipv6, QString& error)
 {
     error.clear();
@@ -730,7 +732,7 @@ bool MacKillSwitch::attachTunnel(const QString& name, const QString& ipv4,
     return apply(next, false, error);
 }
 
-bool MacKillSwitch::allowDtlsPort(quint16 port, QString& error)
+bool NetworkGuard::allowDtlsPort(quint16 port, QString& error)
 {
     error.clear();
     QMutexLocker lock(&m_mutex);
@@ -756,7 +758,7 @@ bool MacKillSwitch::allowDtlsPort(quint16 port, QString& error)
     return apply(next, false, error);
 }
 
-bool MacKillSwitch::lockTunnel(QString& error)
+bool NetworkGuard::lockTunnel(QString& error)
 {
     error.clear();
     QMutexLocker lock(&m_mutex);
@@ -776,7 +778,7 @@ bool MacKillSwitch::lockTunnel(QString& error)
     return apply(next, false, error);
 }
 
-bool MacKillSwitch::disable(QString& error)
+bool NetworkGuard::disable(QString& error)
 {
     m_requested = false;
     error.clear();
@@ -787,7 +789,7 @@ bool MacKillSwitch::disable(QString& error)
     return disableUnlocked(error);
 }
 
-bool MacKillSwitch::disableUnlocked(QString& error)
+bool NetworkGuard::disableUnlocked(QString& error)
 {
     if (!m_armed && QFile::exists(m_statePath) && !load(error))
         return false;
@@ -839,7 +841,7 @@ bool MacKillSwitch::disableUnlocked(QString& error)
     return true;
 }
 
-bool MacKillSwitch::verifyUnlocked(QString& error)
+bool NetworkGuard::verifyUnlocked(QString& error)
 {
     error.clear();
     if (!m_armed) {
@@ -871,13 +873,13 @@ bool MacKillSwitch::verifyUnlocked(QString& error)
     return true;
 }
 
-bool MacKillSwitch::verify(QString& error)
+bool NetworkGuard::verify(QString& error)
 {
     QMutexLocker lock(&m_mutex);
     return verifyUnlocked(error);
 }
 
-QJsonObject MacKillSwitch::diagnostics()
+QJsonObject NetworkGuard::diagnostics()
 {
     // Read-only and available over the authenticated local socket. No journal,
     // PF enable token, profile, credentials, or environment is disclosed.
@@ -893,7 +895,7 @@ QJsonObject MacKillSwitch::diagnostics()
     return report;
 }
 
-bool MacKillSwitch::verifySavedState(QString& error)
+bool NetworkGuard::verifySavedState(QString& error)
 {
     QMutexLocker lock(&m_mutex);
     if (!load(error))
@@ -905,17 +907,17 @@ bool MacKillSwitch::verifySavedState(QString& error)
     return verifyUnlocked(error);
 }
 
-bool MacKillSwitch::isArmed() const
+bool NetworkGuard::isArmed() const
 {
     return m_armed;
 }
 
-bool MacKillSwitch::hasTunnel() const
+bool NetworkGuard::hasTunnel() const
 {
     return m_armed && m_hasTunnel;
 }
 
-bool MacKillSwitch::checkGatewayRoute(QString& error) const
+bool NetworkGuard::checkGatewayRoute(QString& error) const
 {
     QMutexLocker lock(&m_mutex);
     for (const auto& ip : m_policy.addresses) {
@@ -943,7 +945,7 @@ bool MacKillSwitch::checkGatewayRoute(QString& error) const
     return false;
 }
 
-int MacKillSwitch::resolvePinned(const QString& host, const QStringList& addresses,
+int NetworkGuard::resolvePinned(const QString& host, const QStringList& addresses,
     const char* node, const char* service, const struct addrinfo* hints,
     struct addrinfo** result)
 {
@@ -990,7 +992,7 @@ int MacKillSwitch::resolvePinned(const QString& host, const QStringList& address
     return *result ? 0 : lastError;
 }
 
-int MacKillSwitch::resolve(const char* node, const char* service,
+int NetworkGuard::resolve(const char* node, const char* service,
     const struct addrinfo* hints, struct addrinfo** result)
 {
     QMutexLocker lock(&m_mutex);

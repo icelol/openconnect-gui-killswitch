@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "MacBootGuard.h"
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "MacPfStates.h"
 #include "MacPreferencesMigration.h"
 #include <QCoreApplication>
@@ -92,10 +92,10 @@ int runBootProtection(int argc, char** argv)
         // Reproduce Authorization Services: real desktop UID, effective root.
         // Only a private temporary file is changed; no live policy or PF calls.
         QTemporaryDir directory("/private/tmp/ocgui-storage-check.XXXXXX");
-        MacKillSwitch::Policy test;
+        NetworkGuard::Policy test;
         test.host = "storage-check.invalid";
         const auto path = directory.filePath("boot.json");
-        if (!directory.isValid() || !MacKillSwitch::writeBootPolicy(path, test, false, error)) {
+        if (!directory.isValid() || !NetworkGuard::writeBootPolicy(path, test, false, error)) {
             err << error << '\n';
             return 1;
         }
@@ -107,8 +107,8 @@ int runBootProtection(int argc, char** argv)
         const auto uid = QString::fromUtf8(console.readAllStandardOutput()).trimmed().toUInt(&valid);
         if (!valid || uid < 500 || ::setreuid(uid, 0) != 0)
             return 1;
-        const bool saved = MacKillSwitch::writeBootPolicy(path, test, true, error)
-            && MacKillSwitch::writeBootPolicy(path, test, false, error);
+        const bool saved = NetworkGuard::writeBootPolicy(path, test, true, error)
+            && NetworkGuard::writeBootPolicy(path, test, false, error);
         ::setreuid(0, 0);
         if (!saved) {
             err << error << '\n';
@@ -131,12 +131,12 @@ int runBootProtection(int argc, char** argv)
                    : "FAIL: automatic utun allocation\n");
         return ok ? 0 : 1;
     }
-    MacKillSwitch::Policy policy;
+    NetworkGuard::Policy policy;
     bool enabled = true;
     if (arguments.contains("--prepare-boot")) {
         // Installation must work offline and must not activate protection.
         if (QFile::exists(bootProtectionPath())) {
-            if (!MacKillSwitch::readBootPolicy(bootProtectionPath(), policy, enabled, error)) {
+            if (!NetworkGuard::readBootPolicy(bootProtectionPath(), policy, enabled, error)) {
                 err << error << '\n';
                 return 1;
             }
@@ -146,7 +146,7 @@ int runBootProtection(int argc, char** argv)
             policy.udpPorts = {443};
             // Fresh installs leave the normal network available. Only an
             // explicit switch in the GUI may enable boot protection.
-            if (!MacKillSwitch::writeBootPolicy(bootProtectionPath(), policy, false, error)) {
+            if (!NetworkGuard::writeBootPolicy(bootProtectionPath(), policy, false, error)) {
                 err << error << '\n';
                 return 1;
             }
@@ -154,7 +154,7 @@ int runBootProtection(int argc, char** argv)
         out << "Boot protection configuration is ready; no credentials stored\n";
         return 0;
     }
-    if (!MacKillSwitch::readBootPolicy(bootProtectionPath(), policy, enabled, error)) {
+    if (!NetworkGuard::readBootPolicy(bootProtectionPath(), policy, enabled, error)) {
         err << error << '\n';
         return 1;
     }
@@ -167,7 +167,7 @@ int runBootProtection(int argc, char** argv)
         return 0;
     }
     if (arguments.contains("--verify-guard")) {
-        MacKillSwitch guard;
+        NetworkGuard guard;
         if (!guard.verifySavedState(error)) {
             err << error << '\n';
             return 1;
@@ -179,7 +179,7 @@ int runBootProtection(int argc, char** argv)
         err << error << '\n';
         return 1;
     }
-    MacKillSwitch guard({}, "/var/run/openconnect-gui-killswitch/state.json", bootProtectionPath());
+    NetworkGuard guard({}, "/var/run/openconnect-gui-killswitch/state.json", bootProtectionPath());
     if (!guard.restoreBootProtection(error) || !guard.verify(error)) {
         err << error << '\n';
         return 1;

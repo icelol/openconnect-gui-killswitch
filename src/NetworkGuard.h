@@ -13,7 +13,7 @@ struct addrinfo;
 
 // PF rules outlive this object and the GUI process. Only disable() removes them.
 // No global ruleset reload, PF disable, or automatic fail-open cleanup is used.
-class MacKillSwitch {
+class NetworkGuard {
 public:
     struct Result {
         int exitCode = -1;
@@ -41,10 +41,11 @@ public:
     using StatePruner = std::function<bool(const Policy&, bool, QString&)>;
     using DnsLookup = std::function<QStringList(const QString&, const QStringList&, QString&)>;
 
-    explicit MacKillSwitch(Runner runner = {},
+    explicit NetworkGuard(Runner runner = {},
         QString statePath = QStringLiteral("/var/run/openconnect-gui-killswitch/state.json"),
         QString bootPath = {}, StatePruner statePruner = {}, DnsLookup dnsLookup = {},
         QStringList dnsServers = {});
+    ~NetworkGuard();
     // Destructor deliberately leaves the firewall armed.
     bool restore(QString& error);
     bool restoreBootProtection(QString& error);
@@ -82,6 +83,10 @@ public:
         const QString& childAnchors, const QString& interfaces, QString& error);
 
 private:
+#ifdef Q_OS_WIN
+    struct WindowsState;
+    std::unique_ptr<WindowsState> m_windows;
+#endif
     Result run(const QStringList& args, const QByteArray& input = {});
     bool checkEnvironment(QString& error);
     bool apply(const Policy& next, bool flushStates, QString& error);

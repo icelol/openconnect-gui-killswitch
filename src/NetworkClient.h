@@ -10,12 +10,12 @@ int queryNetworkServiceStatus(int argc, char** argv, bool requireVerified = true
 int disableNetworkServiceProtection(int argc, char** argv);
 int queryNetworkServiceDiagnostics(int argc, char** argv);
 
-class MacNetworkClient : public QObject {
+class NetworkClient : public QObject {
     Q_OBJECT
 public:
     using Reply = std::function<void(const QJsonObject&, const QString&)>;
-    explicit MacNetworkClient(QObject* parent = nullptr, QString socketPath = {}, uint expectedUid = 0);
-    ~MacNetworkClient() override;
+    explicit NetworkClient(QObject* parent = nullptr, QString socketPath = {}, uint expectedUid = 0);
+    ~NetworkClient() override;
     void start();
     void request(const QString& method, const QJsonObject& params = {}, Reply reply = {});
     bool available() const;

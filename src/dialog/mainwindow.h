@@ -47,8 +47,8 @@ extern "C" {
 
 class LogDialog;
 class QStateMachine;
-class MacKillSwitch;
-class MacNetworkClient;
+class NetworkGuard;
+class NetworkClient;
 
 namespace Ui {
 class MainWindow;
@@ -64,7 +64,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = 0, bool useTray = false, const QString profileName = {},
-        MacKillSwitch* guard = nullptr, MacNetworkClient* service = nullptr);
+        NetworkGuard* guard = nullptr, NetworkClient* service = nullptr);
     ~MainWindow();
 
     void updateStats(const struct oc_stats* stats, QString dtls);
@@ -127,7 +127,7 @@ private slots:
 
 private:
     friend class KillSwitchUiTest;
-    void initializeNetworkClient(MacNetworkClient* client);
+    void initializeNetworkClient(NetworkClient* client);
     void applyServiceStatus(const QJsonObject& status);
     void updateServiceIndicator();
     void showServiceDiagnostics();
@@ -169,8 +169,8 @@ private:
     QAction* m_minimizeAction;
     QAction* m_restoreAction;
     QAction* m_quitAction;
-    MacKillSwitch* m_killSwitch = nullptr;
-    MacNetworkClient* m_networkClient = nullptr;
+    NetworkGuard* m_killSwitch = nullptr;
+    NetworkClient* m_networkClient = nullptr;
     int m_remoteVpnState = -1;
     bool m_connectRequestPending = false;
     bool m_confirmedArmed = false;

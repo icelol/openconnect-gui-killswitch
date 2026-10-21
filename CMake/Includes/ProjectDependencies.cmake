@@ -23,7 +23,7 @@ endif()
 
 # On MacOS, Linux or when cross-building for Windows we have sane
 # package management. Use it.
-if(CMAKE_CROSSCOMPILING OR NOT WIN32)
+if(CMAKE_CROSSCOMPILING OR NOT WIN32 OR OCGUI_SYSTEM_DEPS)
     find_package(GnuTLS REQUIRED)
     if(GNUTLS_FOUND)
         message(STATUS "Library 'GnuTLS' found at ${GNUTLS_LIBRARIES}")

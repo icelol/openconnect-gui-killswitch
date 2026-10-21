@@ -1,26 +1,34 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "MacNetworkClient.h"
-#include "MacNetworkService.h"
+#include "NetworkClient.h"
+#include "NetworkService.h"
 #include <QJsonDocument>
 #include <QCoreApplication>
 #include <cstdio>
+#ifdef Q_OS_WIN
+#include "WindowsSystemService.h"
+#else
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
-MacNetworkClient::MacNetworkClient(QObject* parent, QString socketPath, uint expectedUid)
+NetworkClient::NetworkClient(QObject* parent, QString socketPath, uint expectedUid)
     : QObject(parent), m_path(socketPath.isEmpty() ? networkServiceSocket() : socketPath),
       m_expectedUid(expectedUid)
 {
     m_socket.setReadBufferSize(65537);
     m_clock.start();
     m_poll.setInterval(2000);
-    connect(&m_poll, &QTimer::timeout, this, &MacNetworkClient::poll);
+    connect(&m_poll, &QTimer::timeout, this, &NetworkClient::poll);
     m_poll.start();
     m_retry.setInterval(1000);
-    connect(&m_retry, &QTimer::timeout, this, &MacNetworkClient::start);
+    connect(&m_retry, &QTimer::timeout, this, &NetworkClient::start);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
+#ifdef Q_OS_WIN
+        if (!WindowsSystemService::trustedServer(m_socket.socketDescriptor())) {
+#else
         uid_t uid; gid_t gid;
         if (::getpeereid(int(m_socket.socketDescriptor()), &uid, &gid) != 0 || uid != m_expectedUid) {
+#endif
             m_authenticated = false; m_socket.abort();
             emit unavailable("Не подтверждена подлинность системной службы");
             return;
@@ -28,7 +36,7 @@ MacNetworkClient::MacNetworkClient(QObject* parent, QString socketPath, uint exp
         m_authenticated = true; m_retry.stop();
         poll();
     });
-    connect(&m_socket, &QLocalSocket::readyRead, this, &MacNetworkClient::read);
+    connect(&m_socket, &QLocalSocket::readyRead, this, &NetworkClient::read);
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         m_authenticated = false;
         m_heartbeat = 0; m_sent.clear();
@@ -46,7 +54,7 @@ MacNetworkClient::MacNetworkClient(QObject* parent, QString socketPath, uint exp
     });
 }
 
-MacNetworkClient::~MacNetworkClient()
+NetworkClient::~NetworkClient()
 {
     // QLocalSocket emits disconnected while its destructor closes the socket.
     // Stop callbacks before member containers or the owning window disappear.
@@ -58,7 +66,7 @@ MacNetworkClient::~MacNetworkClient()
     m_sent.clear();
 }
 
-void MacNetworkClient::loseHealth(const QString& error)
+void NetworkClient::loseHealth(const QString& error)
 {
     emit healthChanged(false, -1);
     emit unavailable(error);
@@ -66,7 +74,7 @@ void MacNetworkClient::loseHealth(const QString& error)
     if (!m_retry.isActive()) m_retry.start();
 }
 
-void MacNetworkClient::poll()
+void NetworkClient::poll()
 {
     if (!available()) return;
     for (auto it = m_sent.cbegin(); it != m_sent.cend(); ++it) {
@@ -84,18 +92,18 @@ void MacNetworkClient::poll()
     });
 }
 
-void MacNetworkClient::start()
+void NetworkClient::start()
 {
     if (m_socket.state() != QLocalSocket::UnconnectedState) return;
     m_socket.connectToServer(m_path);
 }
 
-bool MacNetworkClient::available() const
+bool NetworkClient::available() const
 {
     return m_authenticated && m_socket.state() == QLocalSocket::ConnectedState;
 }
 
-void MacNetworkClient::request(const QString& method, const QJsonObject& params, Reply reply)
+void NetworkClient::request(const QString& method, const QJsonObject& params, Reply reply)
 {
     if (!available()) {
         if (reply) reply({}, "Системная служба недоступна; сетевые настройки не изменены");
@@ -113,7 +121,7 @@ void MacNetworkClient::request(const QString& method, const QJsonObject& params,
     m_socket.write(message);
 }
 
-void MacNetworkClient::read()
+void NetworkClient::read()
 {
     if (!m_authenticated || m_socket.bytesAvailable() > 65536) { m_socket.abort(); return; }
     while (m_socket.canReadLine()) {
@@ -140,9 +148,9 @@ void MacNetworkClient::read()
 int queryNetworkServiceStatus(int argc, char** argv, bool requireVerified)
 {
     QCoreApplication app(argc, argv);
-    MacNetworkClient client;
+    NetworkClient client;
     bool reported = false;
-    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+    QObject::connect(&client, &NetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
         if (reported) return;
         reported = true;
         const auto bytes = QJsonDocument(state).toJson(QJsonDocument::Compact);
@@ -161,9 +169,9 @@ int queryNetworkServiceStatus(int argc, char** argv, bool requireVerified)
 int disableNetworkServiceProtection(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
-    MacNetworkClient client;
+    NetworkClient client;
     bool sent = false, accepted = false;
-    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+    QObject::connect(&client, &NetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
         if (!sent) {
             sent = true;
             // OFF has no dependency on the selected profile, DNS, or VPN login.
@@ -194,9 +202,9 @@ int disableNetworkServiceProtection(int argc, char** argv)
 int queryNetworkServiceDiagnostics(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
-    MacNetworkClient client;
+    NetworkClient client;
     bool sent = false;
-    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+    QObject::connect(&client, &NetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
         if (sent) return;
         sent = true;
         client.request("diagnostics", {}, [&, state](const QJsonObject& result, const QString& error) {

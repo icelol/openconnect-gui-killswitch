@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include <QHostAddress>
 
 // The only state mutation is deletion of a particular interface/protocol/tuple.
@@ -15,9 +15,9 @@ public:
         quint8 protocol = 0, family = 0, direction = 0;
     };
     static bool decode(const QByteArray& wire, State& state, QString& error);
-    static bool permitted(const State& state, const MacKillSwitch::Policy& policy,
+    static bool permitted(const State& state, const NetworkGuard::Policy& policy,
         bool trustedGatewayStates);
     static QByteArray killRequest(const State& state, QString& error);
     static bool read(QList<State>& states, QString& error);
-    static bool prune(const MacKillSwitch::Policy& policy, bool trustedGatewayStates, QString& error);
+    static bool prune(const NetworkGuard::Policy& policy, bool trustedGatewayStates, QString& error);
 };

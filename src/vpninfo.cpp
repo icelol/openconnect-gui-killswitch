@@ -18,7 +18,7 @@
  */
 
 #include "vpninfo.h"
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "VpnCallbacks.h"
 #include "VpnProgress.h"
 #include "config.h"
@@ -431,6 +431,8 @@ static void setup_tun_vfn(void* privdata)
         const char cancel = OC_CMD_CANCEL;
 #ifndef _WIN32
         (void)::write(vpn->get_cmd_fd(), &cancel, 1);
+#else
+        (void)::send(vpn->get_cmd_fd(), &cancel, 1, 0);
 #endif
         return;
     }
@@ -440,6 +442,8 @@ static void setup_tun_vfn(void* privdata)
         const char cancel = OC_CMD_CANCEL;
 #ifndef _WIN32
         (void)::write(vpn->get_cmd_fd(), &cancel, 1);
+#else
+        (void)::send(vpn->get_cmd_fd(), &cancel, 1, 0);
 #endif
         return;
     }
@@ -619,6 +623,10 @@ int VpnInfo::connect()
             + QStringLiteral("/../Resources/ca-bundle.crt");
         if (QFileInfo::exists(roots))
             openconnect_set_cafile(vpninfo, roots.toUtf8().constData());
+#elif defined(Q_OS_WIN)
+    } else {
+        const auto roots = QCoreApplication::applicationDirPath() + "/ca-bundle.crt";
+        if (QFileInfo::exists(roots)) openconnect_set_cafile(vpninfo, roots.toUtf8().constData());
 #endif
     }
 

@@ -25,7 +25,7 @@
 
 class MainWindow;
 class StoredServer;
-class MacKillSwitch;
+class NetworkGuard;
 class VpnCallbacks;
 
 class VpnInfo {
@@ -57,7 +57,7 @@ public:
 
     void logVpncScriptOutput();
     QByteArray generateUniqueInterfaceName();
-    MacKillSwitch* killSwitch = nullptr;
+    NetworkGuard* killSwitch = nullptr;
     bool killSwitchFailed = false;
     bool attachKillSwitchTunnel();
     VpnCallbacks* callbacks = nullptr;

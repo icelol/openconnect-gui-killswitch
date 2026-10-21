@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "MacNetworkService.h"
+#include "NetworkService.h"
 #include "MacBootGuard.h"
+#ifdef Q_OS_WIN
+#include "WindowsSystemService.h"
+#else
 #include "MacPfStates.h"
+#endif
 #include "VpnProgress.h"
 #include "config.h"
 #include "server_storage.h"
@@ -17,9 +21,13 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QtConcurrent/QtConcurrentRun>
+#ifdef Q_OS_WIN
+#include <winsock2.h>
+#else
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 #include <csignal>
 #include <cstdio>
 
@@ -27,6 +35,14 @@ namespace {
 constexpr qint64 maxMessage = 64 * 1024;
 volatile std::sig_atomic_t stopping = 0;
 void requestStop(int) { stopping = 1; }
+void writeCommand(int fd, char command)
+{
+#ifdef Q_OS_WIN
+    (void)::send(SOCKET(fd), &command, 1, 0);
+#else
+    (void)::write(fd, &command, 1);
+#endif
+}
 bool supportedKeys(const QJsonObject& params, const QSet<QString>& keys)
 {
     for (auto it = params.begin(); it != params.end(); ++it)
@@ -43,10 +59,14 @@ void send(QLocalSocket* socket, const QJsonObject& message)
 
 QString networkServiceSocket()
 {
+#ifdef Q_OS_WIN
+    return "OpenConnectKillSwitch-control-v1";
+#else
     return "/var/run/openconnect-gui-killswitch/control.sock";
+#endif
 }
 
-ServiceVpnSession::ServiceVpnSession(MacKillSwitch* guard, const QJsonObject& profile, QObject* parent)
+ServiceVpnSession::ServiceVpnSession(NetworkGuard* guard, const QJsonObject& profile, QObject* parent)
     : QThread(parent), m_guard(guard), m_profile(profile)
 {
     m_connectDeadline.setParent(this);
@@ -81,14 +101,14 @@ void ServiceVpnSession::cancel()
     m_cancelled = true;
     QMetaObject::invokeMethod(&m_connectDeadline, "stop", Qt::AutoConnection);
     QMutexLocker lock(&m_lock);
-    if (m_fd >= 0) { const char cmd = OC_CMD_CANCEL; ::write(m_fd, &cmd, 1); }
+    if (m_fd >= 0) writeCommand(m_fd, OC_CMD_CANCEL);
     m_answerReady.wakeAll();
 }
 
 void ServiceVpnSession::requestStats()
 {
     QMutexLocker lock(&m_lock);
-    if (m_fd >= 0) { const char cmd = OC_CMD_STATS; ::write(m_fd, &cmd, 1); }
+    if (m_fd >= 0) writeCommand(m_fd, OC_CMD_STATS);
 }
 
 bool ServiceVpnSession::awaitingInput() const
@@ -106,7 +126,7 @@ bool ServiceVpnSession::answer(const QString& challenge, bool accepted, const QS
     m_accepted = accepted;
     if (!accepted) {
         m_cancelled = true;
-        if (m_fd >= 0) { const char cmd = OC_CMD_CANCEL; ::write(m_fd, &cmd, 1); }
+        if (m_fd >= 0) writeCommand(m_fd, OC_CMD_CANCEL);
     }
     m_answered = true;
     m_answerReady.wakeAll();
@@ -213,13 +233,13 @@ void ServiceVpnSession::run()
     if (!m_guard->lockTunnel(cleanup)) firewallError(cleanup);
 }
 
-MacNetworkService::MacNetworkService(MacKillSwitch* guard, uint allowedUid, const QString& socket,
+NetworkService::NetworkService(NetworkGuard* guard, NetworkServiceIdentity allowedUser, const QString& socket,
     const QString& initialGateway, QObject* parent)
-    : QObject(parent), m_guard(guard), m_allowedUid(allowedUid), m_socketPath(socket),
+    : QObject(parent), m_guard(guard), m_allowedUser(allowedUser), m_socketPath(socket),
       m_gateway(initialGateway), m_desired(guard->isRequested())
 {
     m_uptime.start(); m_phaseTime.start();
-    connect(&m_server, &QLocalServer::newConnection, this, &MacNetworkService::accept);
+    connect(&m_server, &QLocalServer::newConnection, this, &NetworkService::accept);
     connect(&m_monitor, &QTimer::timeout, this, [this] {
         if (m_session && m_vpnState == "connected") m_session->requestStats();
         if (m_busy || m_recoveryRequired || m_verification.isRunning() || !m_guard->isArmed()) return;
@@ -237,7 +257,7 @@ MacNetworkService::MacNetworkService(MacKillSwitch* guard, uint allowedUid, cons
     });
 }
 
-MacNetworkService::~MacNetworkService()
+NetworkService::~NetworkService()
 {
     m_monitor.stop();
     if (m_session) { m_session->cancel(); m_session->wait(); }
@@ -247,7 +267,7 @@ MacNetworkService::~MacNetworkService()
     m_server.close();
 }
 
-bool MacNetworkService::validGateway(const QString& candidate, QString& error)
+bool NetworkService::validGateway(const QString& candidate, QString& error)
 {
     const QUrl url(candidate);
     if (candidate.size() > 2048 || !url.isValid() || url.scheme() != "https"
@@ -259,7 +279,7 @@ bool MacNetworkService::validGateway(const QString& candidate, QString& error)
     return true;
 }
 
-bool MacNetworkService::supportedProtocol(const QString& protocol)
+bool NetworkService::supportedProtocol(const QString& protocol)
 {
     struct oc_vpn_proto* protocols = nullptr;
     bool found = false;
@@ -271,8 +291,15 @@ bool MacNetworkService::supportedProtocol(const QString& protocol)
     return found;
 }
 
-bool MacNetworkService::start(QString& error, const QString& recoveryError)
+bool NetworkService::start(QString& error, const QString& recoveryError)
 {
+#ifdef Q_OS_WIN
+    const auto parent = WindowsSystemService::directory();
+    if (!WindowsSystemService::isSystem() || !WindowsSystemService::trustedFile(parent)) {
+        error = "Unsafe service directory or service identity"; return false;
+    }
+    m_server.setSocketOptions(QLocalServer::WorldAccessOption);
+#else
     const auto parent = QFileInfo(m_socketPath).absolutePath();
     struct stat directory{};
     if (::lstat(QFile::encodeName(parent).constData(), &directory) != 0
@@ -280,21 +307,26 @@ bool MacNetworkService::start(QString& error, const QString& recoveryError)
         error = "Unsafe service socket directory";
         return false;
     }
+#endif
     m_instance = std::make_unique<QLockFile>(parent + "/service.lock");
     m_instance->setStaleLockTime(0);
     if (!m_instance->tryLock(0)) { error = "Network service is already running"; return false; }
+#ifndef Q_OS_WIN
     struct stat old{};
     const auto path = QFile::encodeName(m_socketPath);
     if (::lstat(path.constData(), &old) == 0) {
-        if (!S_ISSOCK(old.st_mode) || (old.st_uid != ::geteuid() && old.st_uid != m_allowedUid)) {
+        if (!S_ISSOCK(old.st_mode) || (old.st_uid != ::geteuid() && old.st_uid != m_allowedUser)) {
             error = "Unsafe existing service socket"; return false;
         }
         if (::unlink(path.constData()) != 0) { error = "Cannot remove stale service socket"; return false; }
     }
+#endif
     if (!m_server.listen(m_socketPath)) { error = m_server.errorString(); return false; }
-    if (::chmod(path.constData(), 0600) != 0 || ::chown(path.constData(), m_allowedUid, -1) != 0) {
+#ifndef Q_OS_WIN
+    if (::chmod(path.constData(), 0600) != 0 || ::chown(path.constData(), m_allowedUser, -1) != 0) {
         error = "Cannot protect network service socket"; m_server.close(); return false;
     }
+#endif
     // Recovery failures must never remove the control path needed to turn OFF.
     // Keep the failure visible; accepting IPC does not claim a working firewall.
     m_recoveryRequired = !recoveryError.isEmpty();
@@ -304,7 +336,7 @@ bool MacNetworkService::start(QString& error, const QString& recoveryError)
     return true;
 }
 
-QJsonObject MacNetworkService::status() const
+QJsonObject NetworkService::status() const
 {
     auto vpn = m_vpnDetails;
     vpn.insert("state", m_vpnState);
@@ -318,27 +350,31 @@ QJsonObject MacNetworkService::status() const
         {"vpn", vpn}};
 }
 
-void MacNetworkService::reply(QLocalSocket* socket, const QJsonValue& id,
+void NetworkService::reply(QLocalSocket* socket, const QJsonValue& id,
     const QJsonObject& result, const QString& error)
 {
     send(socket, {{"id", id}, {"result", result}, {"error", error}});
 }
 
-void MacNetworkService::broadcast()
+void NetworkService::broadcast()
 {
     ++m_revision;
     const QJsonObject message{{"event", "status"}, {"status", status()}};
-    for (auto client : m_clients) send(client, message);
+    for (auto client : m_clients)
+        if (client->property("authenticated").toBool()) send(client, message);
     emit changed();
 }
 
-void MacNetworkService::accept()
+void NetworkService::accept()
 {
     while (auto socket = m_server.nextPendingConnection()) {
+#ifndef Q_OS_WIN
         uid_t uid; gid_t gid;
-        if (::getpeereid(int(socket->socketDescriptor()), &uid, &gid) != 0 || (uid != m_allowedUid && uid != 0)) {
+        if (::getpeereid(int(socket->socketDescriptor()), &uid, &gid) != 0 || (uid != m_allowedUser && uid != 0)) {
             socket->abort(); socket->deleteLater(); continue;
         }
+#endif
+        if (m_clients.size() >= 32) { socket->abort(); socket->deleteLater(); continue; }
         socket->setReadBufferSize(maxMessage + 1);
         m_clients << socket;
         connect(socket, &QLocalSocket::readyRead, this, [this, socket] {
@@ -351,6 +387,10 @@ void MacNetworkService::accept()
                 if (data.size() > maxMessage || parse.error != QJsonParseError::NoError || !document.isObject()) {
                     socket->abort(); return;
                 }
+#ifdef Q_OS_WIN
+                if (!WindowsSystemService::trustedClient(socket->socketDescriptor())) { socket->abort(); return; }
+                socket->setProperty("authenticated", true);
+#endif
                 dispatch(socket, document.object());
             }
             if (socket->canReadLine()) socket->abort();
@@ -363,11 +403,19 @@ void MacNetworkService::accept()
             }
             socket->deleteLater();
         });
+#ifdef Q_OS_WIN
+        // No network/session details are sent before token authentication.
+        QTimer::singleShot(2000, socket, [socket] {
+            if (!socket->property("authenticated").toBool()) socket->abort();
+        });
+#else
+        socket->setProperty("authenticated", true);
         send(socket, {{"event", "status"}, {"status", status()}});
+#endif
     }
 }
 
-void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& request)
+void NetworkService::dispatch(QLocalSocket* socket, const QJsonObject& request)
 {
     const auto id = request.value("id");
     const auto method = request.value("method").toString();
@@ -439,7 +487,7 @@ void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& reques
     reply(socket, id, {}, "Unsupported service command");
 }
 
-void MacNetworkService::changeFirewall()
+void NetworkService::changeFirewall()
 {
     if (m_busy) { broadcast(); return; }
     m_busy = true; m_verified = false; m_error.clear();
@@ -472,12 +520,12 @@ void MacNetworkService::changeFirewall()
     broadcast();
 }
 
-void MacNetworkService::startVpn()
+void NetworkService::startVpn()
 {
     if (m_pendingProfile.isEmpty() || m_session) return;
     m_session = new ServiceVpnSession(m_guard, m_pendingProfile, this);
     m_pendingProfile = {};
-    connect(m_session, &ServiceVpnSession::notification, this, &MacNetworkService::sessionEvent);
+    connect(m_session, &ServiceVpnSession::notification, this, &NetworkService::sessionEvent);
     connect(m_session, &QThread::finished, this, [this] {
         auto old = m_session; m_session = nullptr; old->deleteLater();
         m_vpnState = "disconnected"; m_vpnDetails = {}; broadcast();
@@ -485,7 +533,7 @@ void MacNetworkService::startVpn()
     m_session->start();
 }
 
-void MacNetworkService::sessionEvent(const QJsonObject& event)
+void NetworkService::sessionEvent(const QJsonObject& event)
 {
     const auto kind = event.value("event").toString();
     if (kind == "auth") {
@@ -506,20 +554,42 @@ void MacNetworkService::sessionEvent(const QJsonObject& event)
         }
         broadcast();
     } else {
-        for (auto client : m_clients) send(client, event);
+        for (auto client : m_clients)
+            if (client->property("authenticated").toBool()) send(client, event);
     }
 }
 
-int runNetworkService(int argc, char** argv)
+static int runNetworkServiceLoop(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    if (!WindowsSystemService::isSystem()) return 1;
+#else
     if (::geteuid() != 0) { std::fprintf(stderr, "Network service requires root\n"); return 1; }
     ::signal(SIGPIPE, SIG_IGN);
     ::signal(SIGTERM, requestStop);
     ::signal(SIGINT, requestStop);
+#endif
     QTimer shutdown;
-    QObject::connect(&shutdown, &QTimer::timeout, &app, [&app] { if (stopping) app.quit(); });
+    QObject::connect(&shutdown, &QTimer::timeout, &app, [&app] {
+#ifdef Q_OS_WIN
+        if (WindowsSystemService::stopping()) app.quit();
+#else
+        if (stopping) app.quit();
+#endif
+    });
     shutdown.start(100);
+#ifdef Q_OS_WIN
+    const auto runtime = WindowsSystemService::directory();
+    const auto user = WindowsSystemService::allowedUser();
+    if (user.isEmpty() || !WindowsSystemService::trustedFile(runtime)) return 1;
+    openconnect_init_ssl();
+    NetworkGuard guard({}, runtime + "/state.json");
+    QString recoveryError, error;
+    if (!guard.restoreBootProtection(recoveryError) || !guard.lockTunnel(recoveryError))
+        std::fprintf(stderr, "Firewall recovery needs attention; OFF control remains available\n");
+    NetworkService service(&guard, user, networkServiceSocket());
+#else
     qputenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     const QString configPath = "/Library/Application Support/OpenConnect-GUI-KillSwitch/service.json";
     struct stat info{};
@@ -536,14 +606,24 @@ int runNetworkService(int argc, char** argv)
     if (::lstat(bytes.constData(), &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != 0 || (info.st_mode & 0022)) return 1;
     if (::chmod(bytes.constData(), 0755) != 0) return 1;
     openconnect_init_ssl();
-    MacKillSwitch guard({}, runtime + "/state.json", bootProtectionPath());
+    NetworkGuard guard({}, runtime + "/state.json", bootProtectionPath());
     QString error;
     // A restarted service owns no old VPN worker. Remove any stale/reused utun
     // exception before accepting commands, while preserving explicit OFF.
     QString recoveryError;
     if (!guard.restoreBootProtection(recoveryError) || !guard.lockTunnel(recoveryError))
         std::fprintf(stderr, "Cannot restore firewall; control remains available for OFF: %s\n", qPrintable(recoveryError));
-    MacNetworkService service(&guard, uint(uid), networkServiceSocket());
+    NetworkService service(&guard, uint(uid), networkServiceSocket());
+#endif
     if (!service.start(error, recoveryError)) { std::fprintf(stderr, "%s\n", qPrintable(error)); return 1; }
     return app.exec();
+}
+
+int runNetworkService(int argc, char** argv)
+{
+#ifdef Q_OS_WIN
+    return WindowsSystemService::dispatch([&] { return runNetworkServiceLoop(argc, argv); });
+#else
+    return runNetworkServiceLoop(argc, argv);
+#endif
 }

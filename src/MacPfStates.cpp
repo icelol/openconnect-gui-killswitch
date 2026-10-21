@@ -118,7 +118,7 @@ bool MacPfStates::decode(const QByteArray& wire, State& state, QString& error)
     return true;
 }
 
-bool MacPfStates::permitted(const State& state, const MacKillSwitch::Policy& policy,
+bool MacPfStates::permitted(const State& state, const NetworkGuard::Policy& policy,
     bool trustedGatewayStates)
 {
     if (state.local.isLoopback() && state.remote.isLoopback())
@@ -191,7 +191,7 @@ bool MacPfStates::read(QList<State>& states, QString& error)
     return false;
 }
 
-bool MacPfStates::prune(const MacKillSwitch::Policy& policy, bool trustedGatewayStates, QString& error)
+bool MacPfStates::prune(const NetworkGuard::Policy& policy, bool trustedGatewayStates, QString& error)
 {
 #ifdef Q_OS_MACOS
     Device device;

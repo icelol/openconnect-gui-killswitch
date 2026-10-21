@@ -50,6 +50,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/Includes/")
 set(SIGN_EXE "false" CACHE STRING "When set to true the executable will be signed")
 
 include(ProjectSettings)
+option(OCGUI_SYSTEM_DEPS "Use native package-manager dependencies on Windows" OFF)
 include(ProjectDependencies)
 include(CheckCXXSymbolExists)
 set(CMAKE_REQUIRED_INCLUDES ${OPENCONNECT_INCLUDE_DIRS})

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "MacPfStates.h"
 #include <QCoreApplication>
 #include <QFile>
@@ -13,10 +13,10 @@
 
 namespace {
 // The ONLY real PF invocation in these tests is the non-mutating parser (-n).
-MacKillSwitch::Result parse(const QByteArray& input)
+NetworkGuard::Result parse(const QByteArray& input)
 {
     QProcess p;
-    p.start("/sbin/pfctl", {"-n", "-v", "-a", MacKillSwitch::anchor(), "-f", "-"});
+    p.start("/sbin/pfctl", {"-n", "-v", "-a", NetworkGuard::anchor(), "-f", "-"});
     if (!p.waitForStarted())
         return {-1, {}, p.errorString()};
     p.write(input);
@@ -40,7 +40,7 @@ struct FakePf {
     QString ciscoRules;
     QString ciscoChildren;
 
-    MacKillSwitch::Result operator()(const QStringList& args, const QByteArray& input)
+    NetworkGuard::Result operator()(const QStringList& args, const QByteArray& input)
     {
         calls << args.join(' ');
         if (args.contains("-n"))
@@ -57,13 +57,13 @@ struct FakePf {
             return {0, "en0\nlo0 (skip)\nutun0\n", {}};
         if (args == QStringList{"-s", "info"})
             return {0, enabled ? "Status: Enabled for 0 days" : "Status: Disabled", {}};
-        if (args == QStringList{"-a", MacKillSwitch::anchor(), "-sr"})
+        if (args == QStringList{"-a", NetworkGuard::anchor(), "-sr"})
             return {0, installed, {}};
         if (args == QStringList{"-E"}) {
             enabled = true;
             return {0, {}, "pf enabled\nToken : 123456\n"};
         }
-        if (args == QStringList{"-a", MacKillSwitch::anchor(), "-f", "-"}) {
+        if (args == QStringList{"-a", NetworkGuard::anchor(), "-f", "-"}) {
             if ((input.isEmpty() && removeFails) || (!input.isEmpty() && loadFails))
                 return {1, {}, "injected load failure"};
             const auto parsed = parse(input);
@@ -83,9 +83,9 @@ struct FakePf {
     }
 };
 
-MacKillSwitch::Policy policy()
+NetworkGuard::Policy policy()
 {
-    MacKillSwitch::Policy p;
+    NetworkGuard::Policy p;
     p.host = "vpn.example.test";
     p.addresses = {"203.0.113.10", "2001:db8::10"};
     p.port = 8443;
@@ -100,7 +100,7 @@ private slots:
     void blockWithoutProfileAndSwitchGatewaysWithoutFailOpen()
     {
         QTemporaryDir directory; FakePf pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY2(guard.arm(QUrl(), error), qPrintable(error));
         QVERIFY(pf.installed.contains("ocgui_ks_block"));
         QVERIFY(!pf.installed.contains("ocgui_ks_gateway"));
@@ -120,8 +120,8 @@ private slots:
         for (int mode = 0; mode != 3; ++mode) {
             QTemporaryDir directory; FakePf pf; QString error;
             bool queriedWhileBlocked = false;
-            MacKillSwitch* active = nullptr;
-            MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"),
+            NetworkGuard* active = nullptr;
+            NetworkGuard guard(std::ref(pf), directory.filePath("state.json"),
                 directory.filePath("boot.json"), {},
                 [&](const QString& host, const QStringList& servers, QString&) {
                     queriedWhileBlocked = host == "vpn.example.test" && servers == QStringList{"192.0.2.53"}
@@ -146,19 +146,19 @@ private slots:
     void dnsBootstrapRulesKeepOtherTrafficBlockedAndValidateAddresses()
     {
         QString error;
-        const auto text = MacKillSwitch::dnsBootstrapRules(policy(), {"192.0.2.53", "2001:db8::53"}, error);
+        const auto text = NetworkGuard::dnsBootstrapRules(policy(), {"192.0.2.53", "2001:db8::53"}, error);
         QVERIFY2(!text.isEmpty(), qPrintable(error));
         QCOMPARE(parse(text.toUtf8()).exitCode, 0);
         QCOMPARE(text.count("port 53 user 0"), 4);
         QVERIFY(text.endsWith("label \"ocgui_ks_block\"\n"));
-        QVERIFY(MacKillSwitch::dnsBootstrapRules(policy(), {"dns.invalid; pass quick all"}, error).isEmpty());
-        QVERIFY(!MacKillSwitch::rules(policy(), error).contains("ocgui_ks_dns"));
+        QVERIFY(NetworkGuard::dnsBootstrapRules(policy(), {"dns.invalid; pass quick all"}, error).isEmpty());
+        QVERIFY(!NetworkGuard::rules(policy(), error).contains("ocgui_ks_dns"));
     }
 
     void negotiatedGatewayAndPortArePinnedForOnlyTheCurrentSession()
     {
         QTemporaryDir directory; FakePf pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"), {}, {},
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"), {}, {},
             [](const QString&, const QStringList&, QString&) { return QStringList{"203.0.113.40"}; },
             {"192.0.2.53"});
         QVERIFY(guard.arm(QUrl("https://203.0.113.20"), error));
@@ -174,8 +174,8 @@ private slots:
         const auto udp443 = parse("pass out quick inet proto udp from any to 203.0.113.40 port 443 user 0 keep state (if-bound) label \"ocgui_ks_endpoint\"\n");
         QCOMPARE(udp443.exitCode, 0);
         QVERIFY2(pf.installed.contains(udp443.output.trimmed()), qPrintable(pf.installed));
-        MacKillSwitch::Policy p = policy();
-        p.sessionEndpoints << MacKillSwitch::Endpoint{"gateway.example.test", {"203.0.113.40"}, 9443, {9443}};
+        NetworkGuard::Policy p = policy();
+        p.sessionEndpoints << NetworkGuard::Endpoint{"gateway.example.test", {"203.0.113.40"}, 9443, {9443}};
         MacPfStates::State state; state.remote = QHostAddress("203.0.113.40");
         state.interfaceName = "en0"; state.direction = 2; state.protocol = 6; state.remotePort = 9443;
         QVERIFY(MacPfStates::permitted(state, p, true));
@@ -195,7 +195,7 @@ private slots:
             QTemporaryDir directory;
             FakePf pf;
             QString error;
-            MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+            NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
             QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
             pf.releaseFails = true; pf.releaseError = message;
             if (message.endsWith("pf not enabled")) pf.enabled = false;
@@ -214,18 +214,18 @@ private slots:
         const auto state = directory.filePath("state.json");
         const auto boot = directory.filePath("boot.json");
         {
-            MacKillSwitch oldService(std::ref(pf), state, boot);
+            NetworkGuard oldService(std::ref(pf), state, boot);
             QVERIFY(oldService.armPinned(policy(), error));
             pf.releaseFails = true;
             QVERIFY(!oldService.disable(error));
             QVERIFY(QFile::exists(state));
             bool enabled = true;
             auto cached = policy();
-            QVERIFY(MacKillSwitch::readBootPolicy(boot, cached, enabled, error));
+            QVERIFY(NetworkGuard::readBootPolicy(boot, cached, enabled, error));
             QVERIFY(!enabled);
         }
         pf.releaseError = "No ALTQ support in kernel\nALTQ related functions disabled\npfctl: pf: token invalid\n";
-        MacKillSwitch service(std::ref(pf), state, boot);
+        NetworkGuard service(std::ref(pf), state, boot);
         QVERIFY2(service.restoreBootProtection(error), qPrintable(error));
         QVERIFY(!service.isArmed());
         QVERIFY(!QFile::exists(state));
@@ -317,24 +317,24 @@ private slots:
     void freshInstallCanBeOffWithoutDnsOrCachedAddresses()
     {
         QTemporaryDir directory;
-        MacKillSwitch::Policy initial;
+        NetworkGuard::Policy initial;
         initial.host = "not-resolved.invalid";
         QString error;
         const auto path = directory.filePath("boot.json");
-        QVERIFY(MacKillSwitch::writeBootPolicy(path, initial, false, error));
-        MacKillSwitch::Policy cached;
+        QVERIFY(NetworkGuard::writeBootPolicy(path, initial, false, error));
+        NetworkGuard::Policy cached;
         bool enabled = true;
-        QVERIFY(MacKillSwitch::readBootPolicy(path, cached, enabled, error));
+        QVERIFY(NetworkGuard::readBootPolicy(path, cached, enabled, error));
         QVERIFY(!enabled);
         QVERIFY(cached.addresses.isEmpty());
         QCOMPARE(cached.host, initial.host);
-        QVERIFY(MacKillSwitch::writeBootPolicy(path, initial, true, error));
-        QVERIFY(MacKillSwitch::readBootPolicy(path, cached, enabled, error));
+        QVERIFY(NetworkGuard::writeBootPolicy(path, initial, true, error));
+        QVERIFY(NetworkGuard::readBootPolicy(path, cached, enabled, error));
         QVERIFY(enabled);
-        const auto blocked = MacKillSwitch::rules(cached, error);
+        const auto blocked = NetworkGuard::rules(cached, error);
         QVERIFY(blocked.contains("block drop quick all"));
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY2(guard.armPinned(cached, error), qPrintable(error));
         QVERIFY2(guard.verify(error), qPrintable(error));
         QVERIFY(guard.disable(error));
@@ -347,11 +347,11 @@ private slots:
         const auto path = directory.filePath("boot.json");
         QString error;
         auto cached = policy();
-        QVERIFY(MacKillSwitch::writeBootPolicy(path, cached, false, error));
+        QVERIFY(NetworkGuard::writeBootPolicy(path, cached, false, error));
         QVERIFY(QFile::setPermissions(path, QFile::ReadOwner));
-        QVERIFY2(MacKillSwitch::writeBootPolicy(path, cached, true, error), qPrintable(error));
+        QVERIFY2(NetworkGuard::writeBootPolicy(path, cached, true, error), qPrintable(error));
         bool enabled = false;
-        QVERIFY(MacKillSwitch::readBootPolicy(path, cached, enabled, error));
+        QVERIFY(NetworkGuard::readBootPolicy(path, cached, enabled, error));
         QVERIFY(enabled);
         QCOMPARE(QFileInfo(path).permissions() & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther), QFile::Permissions{});
     }
@@ -360,7 +360,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.armPinned(policy(), error));
         QVERIFY(guard.disable(error));
@@ -385,7 +385,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.armPinned(policy(), error));
         QVERIFY(guard.prepareConnection(QUrl("https://vpn.example.test:8443"), error));
@@ -402,8 +402,8 @@ private slots:
         FakePf pf;
         const auto bootPath = directory.filePath("boot.json");
         const auto statePath = directory.filePath("state.json");
-        MacKillSwitch gui(std::ref(pf), statePath, bootPath);
-        MacKillSwitch boot(std::ref(pf), statePath, bootPath);
+        NetworkGuard gui(std::ref(pf), statePath, bootPath);
+        NetworkGuard boot(std::ref(pf), statePath, bootPath);
         QString error;
         QVERIFY(gui.armPinned(policy(), error));
         QVERIFY(gui.disable(error));
@@ -419,8 +419,8 @@ private slots:
         QTemporaryDir directory;
         FakePf pf;
         const auto path = directory.filePath("state.json");
-        MacKillSwitch gui(std::ref(pf), path);
-        MacKillSwitch boot(std::ref(pf), path);
+        NetworkGuard gui(std::ref(pf), path);
+        NetworkGuard boot(std::ref(pf), path);
         auto cached = policy();
         cached.host = "never-resolve.invalid";
         QString error;
@@ -429,10 +429,10 @@ private slots:
         QVERIFY(gui.isArmed());
         QCOMPARE(pf.calls.count("-E"), 1);
         QCOMPARE(pf.calls.count(":prune-states"), 1);
-        const auto before = pf.calls.count("-a " + MacKillSwitch::anchor() + " -f -");
-        MacKillSwitch inspection(std::ref(pf), path);
+        const auto before = pf.calls.count("-a " + NetworkGuard::anchor() + " -f -");
+        NetworkGuard inspection(std::ref(pf), path);
         QVERIFY(inspection.verifySavedState(error));
-        QCOMPARE(pf.calls.count("-a " + MacKillSwitch::anchor() + " -f -"), before);
+        QCOMPARE(pf.calls.count("-a " + NetworkGuard::anchor() + " -f -"), before);
     }
 
     void ciscoHookCoexistsButQuickBypassIsRejected()
@@ -440,7 +440,7 @@ private slots:
         QTemporaryDir directory;
         FakePf pf;
         pf.root = "anchor \"cisco.anyconnect.vpn\" all\nanchor \"com.apple/*\" all\n";
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY2(guard.arm(QUrl("https://203.0.113.10"), error), qPrintable(error));
         pf.ciscoRules = "pass out quick all";
@@ -459,7 +459,7 @@ private slots:
     {
         QTemporaryDir directory; FakePf pf; QString error;
         pf.root = "pass out all flags S/SA keep state\nanchor \"com.apple/*\" all\npass quick all\nanchor \"other.firewall\" quick all\n";
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY2(guard.arm(QUrl("https://203.0.113.10"), error), qPrintable(error));
         QVERIFY(guard.isArmed()); QVERIFY(guard.verify(error));
         const auto unchanged = pf.root;
@@ -474,7 +474,7 @@ private slots:
     void offVerificationDetectsOrphanedRulesInsteadOfTrustingMemory()
     {
         QTemporaryDir directory; FakePf pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY(guard.verify(error));
         pf.installed = "block drop quick all label \"ocgui_ks_block\"";
         QVERIFY(!guard.verify(error));
@@ -491,25 +491,25 @@ private slots:
         const auto state = directory.filePath("state.json");
         auto initial = policy();
         initial.host = "never-resolve.invalid";
-        QVERIFY(MacKillSwitch::writeBootPolicy(boot, initial, true, error));
-        MacKillSwitch::Policy cached;
+        QVERIFY(NetworkGuard::writeBootPolicy(boot, initial, true, error));
+        NetworkGuard::Policy cached;
         bool enabled = false;
-        QVERIFY(MacKillSwitch::readBootPolicy(boot, cached, enabled, error));
+        QVERIFY(NetworkGuard::readBootPolicy(boot, cached, enabled, error));
         QVERIFY(enabled);
         QCOMPARE(cached.addresses, initial.addresses);
-        MacKillSwitch guard(std::ref(pf), state, boot);
+        NetworkGuard guard(std::ref(pf), state, boot);
         QVERIFY2(guard.armPinned(cached, error), qPrintable(error));
         QVERIFY(guard.disable(error));
-        QVERIFY(MacKillSwitch::readBootPolicy(boot, cached, enabled, error));
+        QVERIFY(NetworkGuard::readBootPolicy(boot, cached, enabled, error));
         QVERIFY(!enabled);
         // Even with no runtime state, the explicit disable survives a restart.
-        MacKillSwitch stopped(std::ref(pf), state, boot);
+        NetworkGuard stopped(std::ref(pf), state, boot);
         QVERIFY(stopped.restore(error));
         QVERIFY(!stopped.isArmed());
         QVERIFY(stopped.disable(error));
         stopped.requestEnabled(true);
         QVERIFY(stopped.armPinned(cached, error));
-        QVERIFY(MacKillSwitch::readBootPolicy(boot, cached, enabled, error));
+        QVERIFY(NetworkGuard::readBootPolicy(boot, cached, enabled, error));
         QVERIFY(enabled);
     }
 
@@ -520,18 +520,18 @@ private slots:
         hints.ai_socktype = SOCK_STREAM;
         struct addrinfo* result = nullptr;
         const QStringList addresses{"203.0.113.10", "2001:db8::10"};
-        QCOMPARE(MacKillSwitch::resolvePinned("never-resolve.invalid", addresses,
+        QCOMPARE(NetworkGuard::resolvePinned("never-resolve.invalid", addresses,
             "never-resolve.invalid", "8443", &hints, &result), 0);
         QVERIFY(result);
         QVERIFY(result->ai_next);
         freeaddrinfo(result);
         result = nullptr;
-        QCOMPARE(MacKillSwitch::resolvePinned("never-resolve.invalid", addresses,
+        QCOMPARE(NetworkGuard::resolvePinned("never-resolve.invalid", addresses,
             "other.invalid", "8443", &hints, &result), EAI_NONAME);
         QVERIFY(!result);
-        QCOMPARE(MacKillSwitch::resolvePinned("never-resolve.invalid", addresses,
+        QCOMPARE(NetworkGuard::resolvePinned("never-resolve.invalid", addresses,
             "203.0.113.11", "8443", &hints, &result), EAI_NONAME);
-        QCOMPARE(MacKillSwitch::resolvePinned("never-resolve.invalid", addresses,
+        QCOMPARE(NetworkGuard::resolvePinned("never-resolve.invalid", addresses,
             "203.0.113.10", "https", &hints, &result), EAI_SERVICE);
     }
 
@@ -542,7 +542,7 @@ private slots:
         p.ipv4 = "10.23.0.2";
         p.ipv6 = "2001:db8:1::2";
         QString error;
-        const auto text = MacKillSwitch::rules(p, error);
+        const auto text = NetworkGuard::rules(p, error);
         QVERIFY2(!text.isEmpty(), qPrintable(error));
         const auto result = parse(text.toUtf8());
         QCOMPARE(result.exitCode, 0);
@@ -560,24 +560,24 @@ private slots:
         auto p = policy();
         QString error;
         p.addresses << "203.0.113.11\npass quick all";
-        QVERIFY(MacKillSwitch::rules(p, error).isEmpty());
+        QVERIFY(NetworkGuard::rules(p, error).isEmpty());
         p = policy();
         p.interfaceName = "en0";
         p.ipv4 = "10.23.0.2";
-        QVERIFY(MacKillSwitch::rules(p, error).isEmpty());
+        QVERIFY(NetworkGuard::rules(p, error).isEmpty());
         p.interfaceName = "utun1";
         p.ipv4 = "0.0.0.0/0";
-        QVERIFY(MacKillSwitch::rules(p, error).isEmpty());
+        QVERIFY(NetworkGuard::rules(p, error).isEmpty());
     }
 
     void rejectFilterBypasses()
     {
         QString error;
-        QVERIFY(MacKillSwitch::validateEnvironment("anchor \"com.apple/*\" all", {}, "lo0 (skip)\nen0", error));
-        QVERIFY(!MacKillSwitch::validateEnvironment("pass quick all\nanchor \"com.apple/*\" all", {}, {}, error));
-        QVERIFY(!MacKillSwitch::validateEnvironment({}, {}, {}, error));
-        QVERIFY(!MacKillSwitch::validateEnvironment("anchor \"com.apple/*\" all", "00.bypass", {}, error));
-        QVERIFY(!MacKillSwitch::validateEnvironment("anchor \"com.apple/*\" all", {}, "en0 (skip)", error));
+        QVERIFY(NetworkGuard::validateEnvironment("anchor \"com.apple/*\" all", {}, "lo0 (skip)\nen0", error));
+        QVERIFY(!NetworkGuard::validateEnvironment("pass quick all\nanchor \"com.apple/*\" all", {}, {}, error));
+        QVERIFY(!NetworkGuard::validateEnvironment({}, {}, {}, error));
+        QVERIFY(!NetworkGuard::validateEnvironment("anchor \"com.apple/*\" all", "00.bypass", {}, error));
+        QVERIFY(!NetworkGuard::validateEnvironment("anchor \"com.apple/*\" all", {}, "en0 (skip)", error));
     }
 
     void retainRulesOnDestructionAndExplicitlyReleaseOnlyOwnReference()
@@ -586,10 +586,10 @@ private slots:
         FakePf pf;
         QString error;
         {
-            MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+            NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
             QVERIFY2(guard.arm(QUrl("https://203.0.113.10:443"), error), qPrintable(error));
             QVERIFY(guard.isArmed());
-            const auto loadIndex = pf.calls.indexOf("-a " + MacKillSwitch::anchor() + " -f -");
+            const auto loadIndex = pf.calls.indexOf("-a " + NetworkGuard::anchor() + " -f -");
             QVERIFY(loadIndex >= 0);
             QVERIFY(pf.calls.indexOf(":prune-states") > loadIndex);
             QVERIFY(!guard.hasTunnel());
@@ -597,7 +597,7 @@ private slots:
         }
         QVERIFY(pf.installed.contains("ocgui_ks_block"));
         QVERIFY(pf.enabled);
-        MacKillSwitch recovered(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard recovered(std::ref(pf), directory.filePath("state.json"));
         QVERIFY2(recovered.restore(error), qPrintable(error));
         QVERIFY(!recovered.hasTunnel());
         QVERIFY(recovered.disable(error));
@@ -614,7 +614,7 @@ private slots:
         QTemporaryDir directory;
         FakePf pf;
         pf.flushFails = true;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(!guard.arm(QUrl("https://203.0.113.10"), error));
         QVERIFY(guard.isArmed());
@@ -629,7 +629,7 @@ private slots:
         QTemporaryDir directory;
         FakePf pf;
         pf.loadFails = true;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(!guard.arm(QUrl("https://203.0.113.10"), error));
         QVERIFY(!guard.verify(error));
@@ -642,7 +642,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
         pf.enabled = false;
@@ -656,7 +656,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
         QVERIFY(guard.arm(QUrl("https://203.0.113.11"), error));
@@ -670,7 +670,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
         pf.removeFails = true;
@@ -683,7 +683,7 @@ private slots:
     {
         QTemporaryDir directory;
         FakePf pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QString error;
         QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
         pf.releaseFails = true;

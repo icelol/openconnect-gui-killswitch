@@ -27,8 +27,11 @@
 #include "FileLogger.h"
 #include "logger.h"
 #include "MacBootGuard.h"
-#include "MacNetworkService.h"
-#include "MacNetworkClient.h"
+#include "NetworkService.h"
+#include "NetworkClient.h"
+#ifdef Q_OS_WIN
+#include "WindowsSystemService.h"
+#endif
 
 extern "C" {
 #include <gnutls/pkcs11.h>
@@ -91,6 +94,17 @@ int pin_callback(void* userdata, int attempt, const char* token_url,
 
 int main(int argc, char* argv[])
 {
+#ifdef Q_OS_WIN
+    WindowsSystemService::hardenLibrarySearch();
+    for (int i = 1; i < argc; ++i) {
+        const auto command = QString::fromLocal8Bit(argv[i]);
+        if (command == "--install-service" || command == "--uninstall-service" || command == "--recover-killswitch") {
+            QCoreApplication app(argc, argv);
+            return command == "--install-service" ? WindowsSystemService::install()
+                : command == "--uninstall-service" ? WindowsSystemService::uninstall() : WindowsSystemService::recover();
+        }
+    }
+#endif
     // Headless launchd mode must not initialize AppKit, user settings, or the
     // single-instance GUI. Its only persistent data are public gateway IPs.
     for (int i = 1; i < argc; ++i) {
@@ -100,10 +114,12 @@ int main(int argc, char* argv[])
         if (arg == "--service-ready") return queryNetworkServiceStatus(argc, argv, false);
         if (arg == "--service-disable") return disableNetworkServiceProtection(argc, argv);
         if (arg == "--network-service") return runNetworkService(argc, argv);
+#ifndef Q_OS_WIN
         if (arg == "--boot-guard" || arg == "--prepare-boot" || arg == "--check-boot"
             || arg == "--check-tun" || arg == "--verify-guard" || arg == "--check-storage" || arg == "--check-pf-abi"
             || arg == "--migrate-preferences")
             return runBootProtection(argc, argv);
+#endif
     }
 #ifdef Q_OS_MACOS
     if (::geteuid() == 0) {

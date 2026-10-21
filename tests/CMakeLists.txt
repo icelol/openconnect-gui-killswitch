@@ -1,5 +1,5 @@
 find_package(Qt6 REQUIRED COMPONENTS Test)
-add_executable(killswitch-tests MacKillSwitchTest.cpp ../src/MacKillSwitch.cpp ../src/MacPfStates.cpp ../src/MacDnsBootstrap.cpp)
+add_executable(killswitch-tests MacKillSwitchTest.cpp ../src/NetworkGuardMac.cpp ../src/MacPfStates.cpp ../src/MacDnsBootstrap.cpp)
 target_include_directories(killswitch-tests PRIVATE ../src)
 target_link_libraries(killswitch-tests Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME killswitch-safety COMMAND killswitch-tests)
@@ -29,7 +29,7 @@ set_target_properties(killswitch-ui-tests PROPERTIES AUTOUIC_SEARCH_PATHS "${PRO
 add_test(NAME killswitch-ui COMMAND killswitch-ui-tests -platform offscreen)
 
 # Explicit read-only manual probe; never run as part of the offline test suite.
-add_executable(gateway-probe GatewayProbe.cpp ../src/MacKillSwitch.cpp ../src/MacPfStates.cpp ../src/MacDnsBootstrap.cpp)
+add_executable(gateway-probe GatewayProbe.cpp ../src/NetworkGuardMac.cpp ../src/MacPfStates.cpp ../src/MacDnsBootstrap.cpp)
 target_include_directories(gateway-probe PRIVATE ../src ${PROJECT_BINARY_DIR}/src ${OPENCONNECT_INCLUDE_DIRS})
 target_link_directories(gateway-probe PRIVATE ${OPENCONNECT_LIBRARY_DIRS})
 target_link_libraries(gateway-probe Qt6::Core Qt6::Network ${OPENCONNECT_LIBRARIES})

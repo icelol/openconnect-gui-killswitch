@@ -35,22 +35,22 @@ set(${PROJECT_NAME}_SRCS
 
     FileLogger.cpp
     OcSettings.h
-    MacKillSwitch.cpp
-    MacDnsBootstrap.cpp
-    MacDnsBootstrap.h
-    MacPfStates.cpp
-    MacNetworkService.cpp
-    MacNetworkService.h
-    MacNetworkClient.cpp
-    MacNetworkClient.h
-    MacPreferencesMigration.cpp
-    MacPreferencesMigration.h
+    NetworkService.cpp
+    NetworkService.h
+    NetworkClient.cpp
+    NetworkClient.h
     VpnCallbacks.h
     dialog/KillSwitchToggle.h
-    MacKillSwitch.h
-    MacBootGuard.cpp
+    NetworkGuard.h
     MacBootGuard.h
 )
+
+if(WIN32)
+    list(APPEND ${PROJECT_NAME}_SRCS NetworkGuardWin.cpp WindowsSystemService.cpp WindowsSystemService.h WindowsDnsBootstrap.cpp WindowsDnsBootstrap.h)
+else()
+    list(APPEND ${PROJECT_NAME}_SRCS NetworkGuardMac.cpp MacDnsBootstrap.cpp MacDnsBootstrap.h MacPfStates.cpp
+        MacPreferencesMigration.cpp MacPreferencesMigration.h MacBootGuard.cpp)
+endif()
 
 set_source_files_properties(
     ${PROJECT_NAME}.cpp
@@ -127,7 +127,7 @@ if(SIGN_EXE STREQUAL "true")
     )
 endif()
 
-if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
+if(WIN32 AND NOT CMAKE_CROSSCOMPILING AND NOT OCGUI_SYSTEM_DEPS)
     add_dependencies(${PROJECT_NAME}
         openconnect-devel-${openconnect-TAG}
         openconnect-${openconnect-TAG}
@@ -149,6 +149,10 @@ else()
         ${OPENCONNECT_LIBRARIES}
         ${GNUTLS_LIBRARY}
     )
+endif()
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} fwpuclnt iphlpapi advapi32 secur32 wtsapi32 ws2_32 ole32 uuid rpcrt4)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 endif()
 
 if(APPLE)

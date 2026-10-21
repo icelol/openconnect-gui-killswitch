@@ -28,9 +28,9 @@
 #include "ui_mainwindow.h"
 #include "vpninfo.h"
 #include "logger.h"
-#include "MacKillSwitch.h"
+#include "NetworkGuard.h"
 #include "MacBootGuard.h"
-#include "MacNetworkClient.h"
+#include "NetworkClient.h"
 #include "MyInputDialog.h"
 #include <QJsonArray>
 #include <QPointer>
@@ -116,8 +116,8 @@ static QString serviceErrorText(const QString& error)
 }
 
 
-MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName, MacKillSwitch* guard,
-    MacNetworkClient* service)
+MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName, NetworkGuard* guard,
+    NetworkClient* service)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
@@ -137,7 +137,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
 #ifdef Q_OS_MACOS
     if (guard) { // Injected offline test backend; production GUI never owns PF.
     const bool bootInstalled = false;
-    m_killSwitch = guard ? guard : new MacKillSwitch({}, "/var/run/openconnect-gui-killswitch/state.json",
+    m_killSwitch = guard ? guard : new NetworkGuard({}, "/var/run/openconnect-gui-killswitch/state.json",
         bootInstalled ? bootProtectionPath() : QString());
     bool bootEnabled = false;
     if (!qApp->property("previewMode").toBool()) {
@@ -146,9 +146,9 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
         else
             m_killSwitch->restore(m_killSwitchError);
         if (bootInstalled) {
-            MacKillSwitch::Policy policy;
+            NetworkGuard::Policy policy;
             QString error;
-            if (!MacKillSwitch::readBootPolicy(bootProtectionPath(), policy, bootEnabled, error))
+            if (!NetworkGuard::readBootPolicy(bootProtectionPath(), policy, bootEnabled, error))
                 m_killSwitchError = error;
         }
     }
@@ -193,6 +193,13 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     } else if (!qApp->property("previewMode").toBool()) {
         initializeNetworkClient(service);
     } else {
+        ui->killSwitchCheckBox->setEnabled(false);
+        ui->killSwitchOffButton->setEnabled(false);
+        ui->killSwitchStatusLabel->setText(tr("Просмотр интерфейса — сеть не изменяется."));
+    }
+#elif defined(Q_OS_WIN)
+    if (!qApp->property("previewMode").toBool()) initializeNetworkClient(service);
+    else {
         ui->killSwitchCheckBox->setEnabled(false);
         ui->killSwitchOffButton->setEnabled(false);
         ui->killSwitchStatusLabel->setText(tr("Просмотр интерфейса — сеть не изменяется."));
@@ -508,18 +515,18 @@ MainWindow::~MainWindow()
     delete m_killSwitch; // Deliberately does NOT disable protection.
 }
 
-void MainWindow::initializeNetworkClient(MacNetworkClient* client)
+void MainWindow::initializeNetworkClient(NetworkClient* client)
 {
-    m_networkClient = client ? client : new MacNetworkClient(this);
+    m_networkClient = client ? client : new NetworkClient(this);
     m_networkClient->setParent(this);
     ui->killSwitchStatusLabel->setText(tr("Подключение к системной службе…"));
     connect(ui->killSwitchCheckBox, &QCheckBox::toggled, this, &MainWindow::toggleKillSwitch);
-    connect(m_networkClient, &MacNetworkClient::statusChanged, this, &MainWindow::applyServiceStatus);
-    connect(m_networkClient, &MacNetworkClient::healthChanged, this, [this](bool responding, qint64 latency) {
+    connect(m_networkClient, &NetworkClient::statusChanged, this, &MainWindow::applyServiceStatus);
+    connect(m_networkClient, &NetworkClient::healthChanged, this, [this](bool responding, qint64 latency) {
         m_serviceResponding = responding; m_serviceLatency = latency;
         updateServiceIndicator();
     });
-    connect(m_networkClient, &MacNetworkClient::unavailable, this, [this](const QString& error) {
+    connect(m_networkClient, &NetworkClient::unavailable, this, [this](const QString& error) {
         m_connectRequestPending = false;
         m_serviceResponding = false; updateServiceIndicator();
         ui->killSwitchStatusLabel->setText(error);
@@ -527,7 +534,7 @@ void MainWindow::initializeNetworkClient(MacNetworkClient* client)
         QSignalBlocker blocker(ui->killSwitchCheckBox);
         ui->killSwitchCheckBox->setChecked(m_confirmedArmed);
     });
-    connect(m_networkClient, &MacNetworkClient::notification, this, [this](const QJsonObject& event) {
+    connect(m_networkClient, &NetworkClient::notification, this, [this](const QJsonObject& event) {
         const auto kind = event.value("event").toString();
         if (kind == "error") {
             connectionError(event.value("message").toString());
@@ -557,7 +564,7 @@ void MainWindow::initializeNetworkClient(MacNetworkClient* client)
             Logger::instance().addMessage(event.value("message").toString());
         }
     });
-    QTimer::singleShot(0, m_networkClient, &MacNetworkClient::start);
+    QTimer::singleShot(0, m_networkClient, &NetworkClient::start);
 }
 
 void MainWindow::applyServiceStatus(const QJsonObject& status)

@@ -1,0 +1,42 @@
+name: Windows native candidate build
+on:
+  push:
+    branches: [feature/windows-client]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel git curl patch make perl pkgconf ca-certificates
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-svg mingw-w64-ucrt-x86_64-qt6-scxml
+            mingw-w64-ucrt-x86_64-gnutls mingw-w64-ucrt-x86_64-libxml2
+            mingw-w64-ucrt-x86_64-stoken mingw-w64-ucrt-x86_64-lz4
+            mingw-w64-ucrt-x86_64-spdlog mingw-w64-ucrt-x86_64-nsis
+      - name: Build and stage native client
+        run: sh scripts/build-windows.sh
+      - name: Upload candidate and build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-candidate
+          path: |
+            dist/*windows*.exe
+            build/Testing/Temporary/LastTest.log
+            build/deps/source/openconnect-9.21/config.log

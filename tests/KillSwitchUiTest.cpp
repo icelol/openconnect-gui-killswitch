@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "MacKillSwitch.h"
-#include "MacNetworkService.h"
-#include "MacNetworkClient.h"
+#include "NetworkGuard.h"
+#include "NetworkService.h"
+#include "NetworkClient.h"
 #include "dialog/mainwindow.h"
 #include "dialog/MyInputDialog.h"
 #include "FileLogger.h"
@@ -25,7 +25,7 @@ struct Firewall {
     QString installed;
     QString root = "anchor \"com.apple/*\" all";
     bool enabled = false;
-    MacKillSwitch::Result operator()(const QStringList& args, const QByteArray& data)
+    NetworkGuard::Result operator()(const QStringList& args, const QByteArray& data)
     {
         if (args.contains("-n")) {
             QProcess p;
@@ -40,12 +40,12 @@ struct Firewall {
         if (args == QStringList{"-a", "com.apple", "-s", "Anchors"}) return {0, {}, {}};
         if (args == QStringList{"-v", "-s", "Interfaces"}) return {0, "lo0 (skip)\nen0", {}};
         if (args == QStringList{"-s", "info"}) return {0, enabled ? "Status: Enabled" : "Status: Disabled", {}};
-        if (args == QStringList{"-a", MacKillSwitch::anchor(), "-sr"}) return {0, installed, {}};
-        if (args == QStringList{"-a", MacKillSwitch::anchor(), "-f", "-"}) {
+        if (args == QStringList{"-a", NetworkGuard::anchor(), "-sr"}) return {0, installed, {}};
+        if (args == QStringList{"-a", NetworkGuard::anchor(), "-f", "-"}) {
             // PF parser's canonical form was passed through -n immediately
             // before loading. For these tests the textual parser output is
             // needed by verify(), so canonicalize without mutating live PF.
-            const auto parsed = (*this)({"-n", "-v", "-a", MacKillSwitch::anchor(), "-f", "-"}, data);
+            const auto parsed = (*this)({"-n", "-v", "-a", NetworkGuard::anchor(), "-f", "-"}, data);
             installed = parsed.output.trimmed();
             return {parsed.exitCode, {}, parsed.error};
         }
@@ -77,7 +77,7 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        auto guard = new MacKillSwitch(std::ref(pf), directory.filePath("state.json"));
+        auto guard = new NetworkGuard(std::ref(pf), directory.filePath("state.json"));
         MainWindow window(nullptr, false, {}, guard);
         window.show();
         auto checkbox = window.findChild<QCheckBox*>("killSwitchCheckBox");
@@ -132,7 +132,7 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MainWindow window(nullptr, false, {}, new MacKillSwitch(std::ref(pf), directory.filePath("state.json")));
+        MainWindow window(nullptr, false, {}, new NetworkGuard(std::ref(pf), directory.filePath("state.json")));
         window.show();
         auto checkbox = window.findChild<QCheckBox*>("killSwitchCheckBox");
         QTRY_VERIFY(window.findChild<QPushButton*>("connectionButton")->isEnabled());
@@ -150,7 +150,7 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MainWindow window(nullptr, false, {}, new MacKillSwitch(std::ref(pf), directory.filePath("state.json")));
+        MainWindow window(nullptr, false, {}, new NetworkGuard(std::ref(pf), directory.filePath("state.json")));
         window.show();
         auto input = QtConcurrent::run([&] {
             MyInputDialog dialog(&window, "Test authentication", "Password", QLineEdit::Password);
@@ -173,10 +173,10 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
+        NetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
         QString error;
         QVERIFY(service.start(error));
         service.m_monitor.stop();
@@ -186,7 +186,7 @@ private slots:
         settings.setValue("server:" + profile + "/server", "https://203.0.113.10");
         settings.setValue("server:" + profile + "/protocol-name", "anyconnect");
         settings.sync();
-        auto client = new MacNetworkClient(nullptr, socket, getuid());
+        auto client = new NetworkClient(nullptr, socket, getuid());
         MainWindow window(nullptr, false, {}, nullptr, client);
         window.show();
         auto button = window.findChild<QPushButton*>("connectionButton");
@@ -230,14 +230,14 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
+        NetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
         QString error;
         QVERIFY2(service.start(error), qPrintable(error));
         {
-            auto client = new MacNetworkClient(nullptr, socket, getuid());
+            auto client = new NetworkClient(nullptr, socket, getuid());
             MainWindow window(nullptr, false, {}, nullptr, client);
             window.show();
             window.findChild<QComboBox*>("serverList")->setCurrentText("https://203.0.113.10");
@@ -258,8 +258,8 @@ private slots:
             QVERIFY(guard.isArmed());
         }
         QVERIFY(guard.isArmed()); // Closing the GUI did not release the firewall.
-        MacNetworkClient replacement(nullptr, socket, getuid());
-        QSignalSpy snapshots(&replacement, &MacNetworkClient::statusChanged);
+        NetworkClient replacement(nullptr, socket, getuid());
+        QSignalSpy snapshots(&replacement, &NetworkClient::statusChanged);
         replacement.start(); QTRY_VERIFY(!snapshots.isEmpty());
         QVERIFY(snapshots.last().at(0).toJsonObject().value("firewall").toObject().value("armed").toBool());
         replacement.request("firewall", {{"enabled", false}, {"gateway", "https://203.0.113.10"}});
@@ -271,13 +271,13 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
+        NetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
         QString error;
         QVERIFY(service.start(error));
-        MacNetworkClient client(nullptr, socket, getuid());
+        NetworkClient client(nullptr, socket, getuid());
         client.start(); QTRY_VERIFY(client.available());
         QString rejected;
         client.request("exec", {{"command", "must-never-run"}}, [&](const QJsonObject&, const QString& e) { rejected = e; });
@@ -298,21 +298,21 @@ private slots:
             QTRY_VERIFY(!rejected.isEmpty());
             QCOMPARE(service.status().value("vpn").toObject().value("state").toString(), QString("disconnected"));
         }
-        MacNetworkClient untrusted(nullptr, socket, getuid() + 1);
-        QSignalSpy failure(&untrusted, &MacNetworkClient::unavailable);
+        NetworkClient untrusted(nullptr, socket, getuid() + 1);
+        QSignalSpy failure(&untrusted, &NetworkClient::unavailable);
         untrusted.start(); QTRY_VERIFY(!failure.isEmpty()); QVERIFY(!untrusted.available());
     }
 
     void enabledKillSwitchAcceptsDifferentGatewaysAndAllCompiledProtocols()
     {
         QTemporaryDir directory; Firewall pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY(guard.arm(QUrl(), error));
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket);
+        NetworkService service(&guard, getuid(), socket);
         QVERIFY(service.start(error)); service.m_monitor.stop();
         service.m_busy = true; // No live worker, credentials or network used.
-        MacNetworkClient client(nullptr, socket, getuid());
+        NetworkClient client(nullptr, socket, getuid());
         client.start(); QTRY_VERIFY(client.available());
         struct oc_vpn_proto* protocols = nullptr;
         QVERIFY(openconnect_get_supported_protocols(&protocols) > 0);
@@ -339,19 +339,19 @@ private slots:
         QTemporaryDir directory; Firewall pf; QString error;
         const auto state = directory.filePath("state.json"), boot = directory.filePath("boot.json");
         {
-            MacKillSwitch previous(std::ref(pf), state, boot);
+            NetworkGuard previous(std::ref(pf), state, boot);
             QVERIFY(previous.arm(QUrl("https://203.0.113.10"), error));
         }
         // Another app changes PF while this client's protection was persisted ON.
         pf.root.prepend("pass quick all\n");
-        MacKillSwitch guard(std::ref(pf), state, boot);
+        NetworkGuard guard(std::ref(pf), state, boot);
         QVERIFY(!guard.restoreBootProtection(error));
         QVERIFY(!error.isEmpty());
         const auto recoveryError = error;
-        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        NetworkService service(&guard, getuid(), directory.filePath("control.sock"));
         QVERIFY2(service.start(error, recoveryError), qPrintable(error));
         service.m_monitor.stop();
-        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        auto client = new NetworkClient(nullptr, directory.filePath("control.sock"), getuid());
         MainWindow window(nullptr, false, {}, nullptr, client);
         window.show();
         QTRY_VERIFY(client->available());
@@ -364,8 +364,8 @@ private slots:
         QTRY_VERIFY(service.status().value("firewall").toObject().value("verified").toBool());
         QVERIFY(pf.installed.isEmpty());
         QVERIFY(service.status().value("firewall").toObject().value("error").toString().isEmpty());
-        bool enabled = true; MacKillSwitch::Policy policy;
-        QVERIFY(MacKillSwitch::readBootPolicy(boot, policy, enabled, error));
+        bool enabled = true; NetworkGuard::Policy policy;
+        QVERIFY(NetworkGuard::readBootPolicy(boot, policy, enabled, error));
         QVERIFY(!enabled);
         // Recovery did not replace the other application's root policy.
         QVERIFY(pf.root.startsWith("pass quick all"));
@@ -374,10 +374,10 @@ private slots:
     void explicitOffWorksWithUncheckedToggleAfterFailedRecovery()
     {
         QTemporaryDir directory; Firewall pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
-        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkService service(&guard, getuid(), directory.filePath("control.sock"));
         QVERIFY(service.start(error, "Injected recovery failure"));
-        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        auto client = new NetworkClient(nullptr, directory.filePath("control.sock"), getuid());
         MainWindow window(nullptr, false, {}, nullptr, client);
         window.show(); QTRY_VERIFY(client->available());
         QTRY_VERIFY(!window.findChild<QCheckBox*>("killSwitchCheckBox")->isChecked());
@@ -390,9 +390,9 @@ private slots:
     void monitorDoesNotHideAStartupRecoveryFailure()
     {
         QTemporaryDir directory; Firewall pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         QVERIFY(guard.arm(QUrl("https://203.0.113.10"), error));
-        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        NetworkService service(&guard, getuid(), directory.filePath("control.sock"));
         QVERIFY(service.start(error, "Injected startup recovery failure"));
         QVERIFY(service.m_recoveryRequired);
         QVERIFY(QMetaObject::invokeMethod(&service.m_monitor, "timeout", Qt::DirectConnection));
@@ -406,10 +406,10 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
+        NetworkService service(&guard, getuid(), socket, "https://203.0.113.10");
         QString error;
         QVERIFY(service.start(error));
         for (const auto& data : {QByteArray("{broken-json}\n"), QByteArray(65537, 'x')}) {
@@ -426,7 +426,7 @@ private slots:
     {
         QTemporaryDir directory;
         Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         ServiceVpnSession session(&guard, {});
         QSignalSpy challenges(&session, &ServiceVpnSession::notification);
         auto pending = QtConcurrent::run([&] {
@@ -460,7 +460,7 @@ private slots:
     void serviceProgressOmitsAuthenticationSecretsAndReachesGuiLog()
     {
         QTemporaryDir directory; Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         ServiceVpnSession session(&guard, {});
         QSignalSpy events(&session, &ServiceVpnSession::notification);
         for (const auto& value : {"Cookie: sensitive-test-value", "Authorization: Bearer sensitive-test-value", "Password=sensitive-test-value"})
@@ -470,10 +470,10 @@ private slots:
         session.progress(PRG_INFO, "TLS negotiation in progress"); QCOMPARE(events.count(), 1);
         QCOMPARE(events.last().first().toJsonObject().value("message").toString(), QString("TLS negotiation in progress"));
         QVERIFY(!safeVpnProgress("https://vpn.example.test/?session=sensitive-test-value").contains("sensitive-test-value"));
-        MacNetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        NetworkService service(&guard, getuid(), directory.filePath("control.sock"));
         QString error; QVERIFY(service.start(error));
         service.m_monitor.stop(); service.m_busy = true; // Hold before real worker/network.
-        auto client = new MacNetworkClient(nullptr, directory.filePath("control.sock"), getuid());
+        auto client = new NetworkClient(nullptr, directory.filePath("control.sock"), getuid());
         MainWindow window(nullptr, false, {}, nullptr, client);
         window.show(); QTRY_VERIFY(client->available());
         client->request("connect", {{"gateway", "https://vpn.example.test"}, {"protocol", "anyconnect"}});
@@ -490,7 +490,7 @@ private slots:
     void stalledPreLoginConnectionProducesAnErrorInsteadOfInfiniteCancel()
     {
         QTemporaryDir directory; Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         ServiceVpnSession session(&guard, {});
         QSignalSpy events(&session, &ServiceVpnSession::notification);
         auto deadline = session.findChild<QTimer*>("vpnConnectDeadline"); QVERIFY(deadline);
@@ -503,7 +503,7 @@ private slots:
     void connectionDeadlineDoesNotCancelAnOpenPasswordPrompt()
     {
         QTemporaryDir directory; Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         ServiceVpnSession session(&guard, {});
         QSignalSpy events(&session, &ServiceVpnSession::notification);
         auto pending = QtConcurrent::run([&] { QString answer; return session.input("Password", "Password", {}, true, {}, {}, answer); });
@@ -522,7 +522,7 @@ private slots:
     void answeringPasswordAllowsSlowServerAndShowsAuthenticationPhase()
     {
         QTemporaryDir directory; Firewall pf;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
         ServiceVpnSession session(&guard, {});
         QSignalSpy events(&session, &ServiceVpnSession::notification);
         auto pending = QtConcurrent::run([&] { QString answer; return session.input("Password", "Password", {}, true, {}, {}, answer); });
@@ -541,17 +541,17 @@ private slots:
     void serviceIndicatorPollsRecoversAndVpnErrorsLeaveControlsAccessible()
     {
         QTemporaryDir directory; Firewall pf; QString error;
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket);
+        NetworkService service(&guard, getuid(), socket);
         QVERIFY(service.start(error)); service.m_monitor.stop();
-        auto client = new MacNetworkClient(nullptr, socket, getuid());
+        auto client = new NetworkClient(nullptr, socket, getuid());
         MainWindow window(nullptr, false, {}, nullptr, client); window.show();
         auto indicator = window.findChild<QLabel*>("serviceStatusLabel"); QVERIFY(indicator);
         QTRY_VERIFY(window.m_serviceResponding);
         QVERIFY(indicator->text().contains("Служба: отвечает"));
         QVERIFY(indicator->text().contains(service.status().value("service").toObject().value("version").toString()));
-        QSignalSpy snapshots(client, &MacNetworkClient::statusChanged);
+        QSignalSpy snapshots(client, &NetworkClient::statusChanged);
         const auto before = snapshots.count();
         client->poll(); QTRY_VERIFY(snapshots.count() > before);
         service.m_vpnState = "connecting"; service.m_vpnDetails = {{"phase", "authenticating"}}; service.broadcast();
@@ -574,10 +574,10 @@ private slots:
     {
         QTemporaryDir directory; Firewall pf; QString error;
         pf.root.prepend("pass quick all\n");
-        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
         const auto socket = directory.filePath("control.sock");
-        MacNetworkService service(&guard, getuid(), socket); QVERIFY(service.start(error));
-        auto client = new MacNetworkClient(nullptr, socket, getuid());
+        NetworkService service(&guard, getuid(), socket); QVERIFY(service.start(error));
+        auto client = new NetworkClient(nullptr, socket, getuid());
         MainWindow window(nullptr, false, {}, nullptr, client); window.show();
         QTRY_VERIFY(window.m_serviceResponding);
         client->request("firewall", {{"enabled", true}, {"gateway", "https://203.0.113.10"}});
