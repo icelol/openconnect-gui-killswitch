@@ -89,6 +89,6 @@ Section "Uninstall"
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OpenConnectKillSwitch"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnectKillSwitch"
   RMDir /r "$SMPROGRAMS\OpenConnect Kill Switch"
-  RMDir /r "$COMMONAPPDATA\OpenConnect-GUI-KillSwitch"
+  RMDir /r "$APPDATA\OpenConnect-GUI-KillSwitch"
   RMDir /r "$INSTDIR"
 SectionEnd

@@ -176,8 +176,15 @@ endif()
 
 
 # common stuff to link...
+if(WIN32 AND OCGUI_SYSTEM_DEPS)
+    # MSYS2's compiled spdlog uses narrow filenames. Header-only keeps the
+    # existing UTF-16 Windows log paths without an incompatible DLL ABI.
+    set(OCGUI_SPDLOG_TARGET spdlog::spdlog_header_only)
+else()
+    set(OCGUI_SPDLOG_TARGET spdlog::spdlog)
+endif()
 target_link_libraries (${PROJECT_NAME}
-    spdlog::spdlog
+    ${OCGUI_SPDLOG_TARGET}
     qt-solutions::qtsingleapplication
 
     Qt6::Core

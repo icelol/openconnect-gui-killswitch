@@ -21,6 +21,7 @@ for path in stage.rglob('*'):
     count += 1
 assert (stage/'platforms/qwindows.dll').is_file()
 assert (stage/'wintun.dll').is_file()
+assert b'asInvoker' in (stage/'openconnect-gui.exe').read_bytes(), 'GUI must not request administrator elevation'
 assert (stage/'ca-bundle.crt').read_bytes().count(b'BEGIN CERTIFICATE') > 20
 assert not list(stage.rglob('*.pfx')) and not list(stage.rglob('*.p12'))
 print(json.dumps({'native_x64_pe_files':count,'platform_plugin':'passed','public_ca_bundle':'passed'},indent=2))
