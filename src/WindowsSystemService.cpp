@@ -236,6 +236,26 @@ bool WindowsSystemService::protectFile(const QString& path, QString& error)
     return true;
 }
 
+bool WindowsSystemService::prepareEnvironment(QString& error)
+{
+    const auto temporary = QDir(directory()).filePath("tmp");
+    if (!isSystem() || !QDir().mkpath(temporary) || !trustedFile(temporary)) {
+        error = "Cannot prepare protected service temporary storage";
+        return false;
+    }
+    const auto path = QDir::toNativeSeparators(temporary).toStdWString();
+    wchar_t system[MAX_PATH]{};
+    if (!GetSystemDirectoryW(system, MAX_PATH)
+        || !SetEnvironmentVariableW(L"TEMP", path.c_str()) || !SetEnvironmentVariableW(L"TMP", path.c_str())
+        || !SetEnvironmentVariableW(L"PATH", system)
+        || !SetEnvironmentVariableW(L"COMSPEC", (std::wstring(system) + L"\\cmd.exe").c_str())
+        || !SetEnvironmentVariableW(L"LOG2FILE", L"1") || !SetEnvironmentVariableW(L"LOG_LEVEL", L"1")) {
+        error = "Cannot set the protected service environment";
+        return false;
+    }
+    return true;
+}
+
 QString WindowsSystemService::allowedUser()
 {
     if (!ownerSid.isEmpty())

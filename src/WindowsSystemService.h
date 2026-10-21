@@ -11,6 +11,7 @@ QString allowedUser();
 bool isSystem();
 bool protectDirectory(QString& error);
 bool protectFile(const QString& path, QString& error);
+bool prepareEnvironment(QString& error);
 bool trustedFile(const QString& path);
 bool trustedClient(qintptr pipe);
 bool trustedServer(qintptr pipe);

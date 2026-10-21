@@ -586,6 +586,11 @@ static int runNetworkServiceLoop(int argc, char** argv)
         std::fprintf(stderr, "Service configuration ownership or account is invalid\n");
         return 1;
     }
+    QString environmentError;
+    if (!WindowsSystemService::prepareEnvironment(environmentError)) {
+        std::fprintf(stderr, "%s\n", qPrintable(environmentError));
+        return 1;
+    }
     openconnect_init_ssl();
     NetworkGuard guard({}, runtime + "/state.json");
     QString recoveryError, error;

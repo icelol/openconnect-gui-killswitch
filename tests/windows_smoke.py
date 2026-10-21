@@ -242,6 +242,7 @@ except BaseException:
             print('CI diagnosis:',pathlib.Path(args[0]).name,result.returncode,result.stdout[-4000:],result.stderr[-4000:])
         except (OSError,subprocess.TimeoutExpired) as error:print(type(error).__name__)
     if (data/'service.log').exists():print((data/'service.log').read_text(errors='replace')[-5000:])
+    if (data/'tmp/vpnc.log').exists():print((data/'tmp/vpnc.log').read_text(errors='replace')[-6000:])
     raise
 finally:
     if fixture:fixture.close()

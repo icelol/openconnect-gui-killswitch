@@ -14,6 +14,10 @@ account and local logon type, and rejects network/delegated logons. No status is
 sent before authentication. Arbitrary scripts, files, proxy settings and client
 certificate paths are not accepted through IPC.
 
+The privileged runtime uses administrator/System-only temporary storage and a
+System32 command search path. The bundled route script and Wintun extraction do
+not use a user-writable global temporary directory.
+
 WFP owns a project-specific persistent provider and sublayer. Four persistent
 ALE filters block outbound and inbound-initiated traffic for IPv4 and IPv6.
 Higher-weight rules inside the same sublayer allow loopback, system DHCP and
