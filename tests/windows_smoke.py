@@ -221,14 +221,24 @@ try:
     report['installer_upgrade_preserves_on']='passed'
     pipe.request('firewall',{'enabled':False});pipe.settled(False)
     assert external();report['explicit_off_restores_network']='passed'
+    pipe.request('firewall',{'enabled':True,'gateway':''});pipe.settled(True)
+    assert not external()
     pipe.close();pipe=None
-    uninstall=runtime.parent/'Uninstall.exe'
+    # Run a byte-identical copy outside the installation directory, as NSIS
+    # normally does, so the uninstaller can remove its original executable too.
+    uninstall=root/'build/uninstall-check.exe'
+    shutil.copy2(runtime.parent/'Uninstall.exe',uninstall)
     # NSIS requires _?= to be the final UNQUOTED command-line tail, including
     # spaces. list2cmdline would quote it and make NSIS spawn a background copy.
-    command='"'+str(uninstall)+'" /S _?='+str(runtime.parent)
+    # UCRT Python may stringify paths with '/'; NSIS validates drive roots as
+    # C:\\, so the _?= argument must use native backslashes.
+    command='"'+str(uninstall).replace('/','\\')+'" /S _?='+str(runtime.parent).replace('/','\\')
     removed=subprocess.run(command,capture_output=True,text=True,errors='replace',timeout=60)
-    assert removed.returncode==0,'Uninstaller failed: '+removed.stderr[-2000:]
-    assert not (data/'state.json').exists(),'Uninstall left service state'
+    assert removed.returncode==0,'Uninstaller failed ('+str(removed.returncode)+'): '+removed.stderr[-2000:]
+    assert not data.exists(),'Uninstall left service data'
+    assert not runtime.parent.exists(),'Uninstall left installed runtime files'
+    service=subprocess.run(['sc.exe','query','OpenConnectKillSwitch'],capture_output=True,text=True,errors='replace',timeout=10)
+    assert service.returncode==1060,'Uninstall left its Windows service: '+service.stdout
     assert external(),'Uninstall did not leave network available'
     run('powershell.exe','-NoProfile','-NonInteractive','-Command',
         "if (!(Get-NetFirewallRule -Name '"+foreign+"' -ErrorAction Stop)) { exit 1 }")
