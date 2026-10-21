@@ -16,17 +16,19 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include "WindowsWfpConstants.h"
 #include <array>
 #include <cstring>
+// clang-format off
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #include <fwpmu.h>
+#include "WindowsWfpConstants.h"
 #include <iphlpapi.h>
 #include <netioapi.h>
 #include <sddl.h>
+// clang-format on
 #include <vector>
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
 
 namespace {
 // Stable project-owned keys; no filters from another provider are mutated.

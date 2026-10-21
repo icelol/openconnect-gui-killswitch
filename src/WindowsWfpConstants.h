@@ -6,6 +6,7 @@
 // https://github.com/microsoft/win32metadata/tree/main/generation/WinSDK/RecompiledIdlHeaders
 // Project-local constants avoid depending on MinGW's incomplete GUID library.
 #ifdef __MINGW32__
+#include <guiddef.h>
 namespace OcguiWfp {
 inline constexpr GUID FWPM_CONDITION_ALE_APP_ID{ 0xd78e1e87, 0x8644, 0x4ea5, { 0x94, 0x37, 0xd8, 0x09, 0xec, 0xef, 0xc9, 0x71 } };
 inline constexpr GUID FWPM_CONDITION_ALE_USER_ID{ 0xaf043a0a, 0xb34d, 0x4f86, { 0x97, 0x9c, 0xc9, 0x03, 0x71, 0xaf, 0x6e, 0x66 } };

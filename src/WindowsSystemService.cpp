@@ -11,14 +11,16 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <aclapi.h>
 #include <atomic>
 #include <cstdio>
+// clang-format off
+#include <windows.h>
+#include <aclapi.h>
 #include <ntsecapi.h>
 #include <sddl.h>
 #include <shlobj.h>
+// clang-format on
 #include <vector>
-#include <windows.h>
 
 namespace {
 constexpr wchar_t name[] = L"OpenConnectKillSwitch";
