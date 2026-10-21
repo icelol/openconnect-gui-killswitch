@@ -223,7 +223,11 @@ try:
     assert external();report['explicit_off_restores_network']='passed'
     pipe.close();pipe=None
     uninstall=runtime.parent/'Uninstall.exe'
-    run(uninstall,'/S','_?='+str(runtime.parent),timeout=60)
+    # NSIS requires _?= to be the final UNQUOTED command-line tail, including
+    # spaces. list2cmdline would quote it and make NSIS spawn a background copy.
+    command='"'+str(uninstall)+'" /S _?='+str(runtime.parent)
+    removed=subprocess.run(command,capture_output=True,text=True,errors='replace',timeout=60)
+    assert removed.returncode==0,'Uninstaller failed: '+removed.stderr[-2000:]
     assert not (data/'state.json').exists(),'Uninstall left service state'
     assert external(),'Uninstall did not leave network available'
     run('powershell.exe','-NoProfile','-NonInteractive','-Command',
