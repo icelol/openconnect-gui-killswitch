@@ -201,8 +201,6 @@ bool WindowsSystemService::protectDirectory(QString& error)
 
 bool WindowsSystemService::protectFile(const QString& path, QString& error)
 {
-    if (trustedFile(path))
-        return true;
     if (!trustedFile(QFileInfo(path).absolutePath())) {
         error = "Unsafe parent directory for service data";
         return false;
@@ -215,12 +213,22 @@ bool WindowsSystemService::protectFile(const QString& path, QString& error)
     }
     // An elevated token can still use the individual account as default owner.
     // Persisted data must remain trusted after SCM switches to LocalSystem.
-    PSID admins = nullptr;
-    if (!ConvertStringSidToSidW(L"S-1-5-32-544", &admins))
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)",
+            SDDL_REVISION_1, &descriptor, nullptr))
         return false;
+    PSID admins = nullptr;
+    PACL acl = nullptr;
+    BOOL defaulted = FALSE, present = FALSE;
+    if (!GetSecurityDescriptorOwner(descriptor, &admins, &defaulted)
+        || !GetSecurityDescriptorDacl(descriptor, &present, &acl, &defaulted) || !present || !acl) {
+        LocalFree(descriptor);
+        return false;
+    }
     const auto result = SetNamedSecurityInfoW(const_cast<wchar_t*>(native.c_str()), SE_FILE_OBJECT,
-        OWNER_SECURITY_INFORMATION, admins, nullptr, nullptr, nullptr);
-    LocalFree(admins);
+        OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        admins, nullptr, acl, nullptr);
+    LocalFree(descriptor);
     if (result != ERROR_SUCCESS || !trustedFile(path)) {
         error = QString("Cannot protect service data ownership (%1)").arg(result);
         return false;
