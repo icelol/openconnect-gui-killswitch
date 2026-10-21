@@ -184,11 +184,19 @@ try:
         time.sleep(.1)
     assert fixture.authenticated.is_set() and fixture.cstp.is_set()
     assert state['firewall']['tunnel'], 'Connected VPN lacks verified adapter permission'
+    # Netsh can return before Windows finishes Duplicate Address Detection.
+    # Retry a bounded period on the same verified tunnel; never relax filtering.
     with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
-        probe.settimeout(5);probe.sendto(b'OpenConnect Wintun data-path QA',('192.0.2.1',12345))
-        payload,peer=probe.recvfrom(512)
+        probe.settimeout(1);deadline=time.monotonic()+8
+        while True:
+            try:
+                probe.sendto(b'OpenConnect Wintun data-path QA',('192.0.2.1',12345))
+                payload,peer=probe.recvfrom(512);break
+            except OSError:
+                if time.monotonic()>=deadline:raise
+                time.sleep(.2)
         assert payload==b'OpenConnect Wintun data-path QA' and peer==('192.0.2.1',12345)
-    assert fixture.data.is_set() and not external(), 'Tunnel or outside routing policy failed'
+    assert fixture.data.wait(1) and not external(), 'Tunnel or outside routing policy failed'
     report['username_password_cstp_wintun_udp']='passed with local TLS fixture'
     pipe.request('disconnect')
     deadline=time.monotonic()+10
@@ -227,7 +235,8 @@ except BaseException:
     # This runs only in a disposable CI account. Print bounded service/ACL
     # diagnostics without credentials, HTTP bodies or the fixture private key.
     for args in [('sc.exe','query','OpenConnectKillSwitch'),('icacls.exe',str(runtime.parent)),
-                 (str(runtime),'--install-service')]:
+                 ('powershell.exe','-NoProfile','-NonInteractive','-Command',
+                  "Get-NetIPAddress -IPAddress 192.0.2.2 -ErrorAction SilentlyContinue | Format-List; Get-NetRoute -DestinationPrefix '192.0.2.0/24' -ErrorAction SilentlyContinue | Format-List")]:
         try:
             result=subprocess.run(args,capture_output=True,text=True,errors='replace',timeout=20)
             print('CI diagnosis:',pathlib.Path(args[0]).name,result.returncode,result.stdout[-4000:],result.stderr[-4000:])
