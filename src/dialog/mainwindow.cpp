@@ -63,6 +63,9 @@ extern "C" {
 #include <QNetworkAccessManager>
 #include <QProgressDialog>
 #include <QSignalBlocker>
+#include <QPlainTextEdit>
+#include <QDialogButtonBox>
+#include <QJsonDocument>
 
 #include <cmath>
 #include <cstdarg>
@@ -99,6 +102,19 @@ static int app_loglevel_rtab[] = {
     PRG_TRACE  // [3]
 };
 
+static QString serviceErrorText(const QString& error)
+{
+    if (error.startsWith("Custom PF root rules") || error.startsWith("A PF rule before"))
+        return QObject::tr("Другие правила PF выполняются раньше блокировки OpenConnect. Откройте «Диагностика службы» для проверки конфликта.");
+    if (error.startsWith("VPN server did not complete authentication"))
+        return QObject::tr("Сервер VPN не завершил авторизацию за 90 секунд. Принятие пароля не подтверждено.");
+    if (error.startsWith("VPN connection timed out"))
+        return QObject::tr("Сервер VPN не ответил на этапе соединения. Проверьте журнал и настройки TLS профиля.");
+    if (error.startsWith("VPN tunnel setup timed out"))
+        return QObject::tr("Авторизация завершилась, но создание VPN-туннеля заняло слишком много времени.");
+    return error;
+}
+
 
 MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName, MacKillSwitch* guard,
     MacNetworkClient* service)
@@ -106,9 +122,14 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    ui->vpnErrorLabel->hide();
     connect(ui->killSwitchOffButton, &QPushButton::clicked, this, [this] { toggleKillSwitch(false); });
+    connect(ui->serviceDiagnosticsButton, &QPushButton::clicked, this, &MainWindow::showServiceDiagnostics);
     connect(this, &MainWindow::connectionErrorChanged, this, [this](const QString& error) {
-        QMessageBox::warning(this, tr("VPN connection failed"), error);
+        emit cancelAuthDialogs();
+        ui->vpnErrorLabel->setText(serviceErrorText(error));
+        ui->vpnErrorLabel->setVisible(!error.isEmpty());
+        Logger::instance().addMessage(serviceErrorText(error));
     }, Qt::QueuedConnection);
 
 
@@ -494,8 +515,13 @@ void MainWindow::initializeNetworkClient(MacNetworkClient* client)
     ui->killSwitchStatusLabel->setText(tr("Подключение к системной службе…"));
     connect(ui->killSwitchCheckBox, &QCheckBox::toggled, this, &MainWindow::toggleKillSwitch);
     connect(m_networkClient, &MacNetworkClient::statusChanged, this, &MainWindow::applyServiceStatus);
+    connect(m_networkClient, &MacNetworkClient::healthChanged, this, [this](bool responding, qint64 latency) {
+        m_serviceResponding = responding; m_serviceLatency = latency;
+        updateServiceIndicator();
+    });
     connect(m_networkClient, &MacNetworkClient::unavailable, this, [this](const QString& error) {
         m_connectRequestPending = false;
+        m_serviceResponding = false; updateServiceIndicator();
         ui->killSwitchStatusLabel->setText(error);
         // Keep the last confirmed indicator. Losing IPC never means OFF.
         QSignalBlocker blocker(ui->killSwitchCheckBox);
@@ -536,6 +562,7 @@ void MainWindow::initializeNetworkClient(MacNetworkClient* client)
 
 void MainWindow::applyServiceStatus(const QJsonObject& status)
 {
+    m_serviceStatus = status; updateServiceIndicator();
     const auto firewall = status.value("firewall").toObject();
     m_confirmedArmed = firewall.value("armed").toBool();
     const bool busy = firewall.value("busy").toBool();
@@ -545,8 +572,13 @@ void MainWindow::applyServiceStatus(const QJsonObject& status)
     }
     QString text;
     if (busy) text = firewall.value("requested").toBool() ? tr("Включение блокировки…") : tr("Выключение блокировки…");
-    else if (!firewall.value("error").toString().isEmpty())
-        text = tr("Состояние защиты не подтверждено: %1").arg(firewall.value("error").toString());
+    else if (!firewall.value("error").toString().isEmpty()) {
+        text = !m_confirmedArmed && firewall.value("verified").toBool()
+            ? (firewall.value("errorAction").toString() == "disable"
+                ? tr("Блокировка снята; ошибка сохранения состояния: %1")
+                : tr("Блокировка выключена. Не удалось включить: %1")).arg(serviceErrorText(firewall.value("error").toString()))
+            : tr("Состояние защиты не подтверждено: %1").arg(serviceErrorText(firewall.value("error").toString()));
+    }
     else if (!firewall.value("verified").toBool()) text = tr("Ожидание проверки системной защиты…");
     else if (!m_confirmedArmed) text = tr("Выключено — блокировка OpenConnect снята. Правила других программ сохраняются.");
     else text = firewall.value("tunnel").toBool()
@@ -556,6 +588,15 @@ void MainWindow::applyServiceStatus(const QJsonObject& status)
     ui->killSwitchStatusLabel->setToolTip(text);
     const auto vpn = status.value("vpn").toObject();
     const auto state = vpn.value("state").toString();
+    const auto phase = vpn.value("phase").toString();
+    QString phaseText = state == "connected" ? tr("подключён") : state == "disconnected" ? tr("не подключён")
+        : state == "disconnecting" ? tr("отключение") : phase == "credentials" ? tr("ожидание логина или пароля")
+        : phase == "authenticating" ? tr("ожидание ответа сервера авторизации")
+        : phase == "tunnel" ? tr("создание туннеля") : phase == "login" ? tr("соединение с сервером входа")
+        : tr("подготовка подключения");
+    if (state != "connected" && state != "disconnected")
+        phaseText += tr(" · %1 с").arg(vpn.value("phaseElapsedMs").toString().toLongLong() / 1000);
+    ui->vpnPhaseLabel->setText(tr("VPN: %1").arg(phaseText));
     const int next = state == "connected" ? STATUS_CONNECTED : state == "connecting" ? STATUS_CONNECTING
         : state == "disconnecting" ? STATUS_DISCONNECTING : STATUS_DISCONNECTED;
     dns = vpn.value("dns").toString(); ip = vpn.value("ip").toString(); ip6 = vpn.value("ip6").toString();
@@ -566,6 +607,51 @@ void MainWindow::applyServiceStatus(const QJsonObject& status)
         m_remoteVpnState = next;
         changeStatus(next);
     }
+}
+
+void MainWindow::updateServiceIndicator()
+{
+    const auto service = m_serviceStatus.value("service").toObject();
+    const auto version = service.value("version").toString();
+    const bool mismatch = !version.isEmpty() && version != QStringLiteral(PROJECT_VERSION);
+    const auto color = !m_serviceResponding ? "#c0392b" : mismatch ? "#b7791f" : "#22863a";
+    const auto label = !m_serviceResponding ? tr("Служба: нет ответа — переподключение…")
+        : mismatch ? tr("Служба: отвечает, требуется обновление") : tr("Служба: отвечает");
+    QString details;
+    if (m_serviceResponding) {
+        if (!version.isEmpty()) details += " · v" + version;
+        if (m_serviceLatency >= 0) details += tr(" · %1 мс").arg(m_serviceLatency);
+    }
+    ui->serviceStatusLabel->setText(QString("<span style='color:%1'>●</span> %2%3")
+        .arg(color, label.toHtmlEscaped(), details.toHtmlEscaped()));
+    ui->serviceStatusLabel->setAccessibleName(label + details);
+    ui->serviceStatusLabel->setToolTip(tr("Проверка ответа каждые 2 секунды. PID: %1. Время работы: %2 с. Индикатор службы не подтверждает включение блокировки.")
+        .arg(service.value("pid").toString()).arg(service.value("uptimeMs").toString().toLongLong() / 1000));
+}
+
+void MainWindow::showServiceDiagnostics()
+{
+    auto dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Диагностика службы OpenConnect"));
+    dialog->setWindowModality(Qt::NonModal);
+    dialog->resize(660, 430);
+    auto layout = new QVBoxLayout(dialog);
+    auto text = new QPlainTextEdit(dialog); text->setReadOnly(true);
+    text->setObjectName("serviceDiagnosticsText");
+    text->setPlainText(QString::fromUtf8(QJsonDocument(m_serviceStatus).toJson(QJsonDocument::Indented)));
+    layout->addWidget(text);
+    auto buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    layout->addWidget(buttons);
+    dialog->show();
+    if (!m_networkClient) return;
+    QPointer<QPlainTextEdit> output(text);
+    m_networkClient->request("diagnostics", {}, [output](const QJsonObject& result, const QString& error) {
+        if (!output) return;
+        output->appendPlainText(error.isEmpty()
+            ? QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Indented)) : serviceErrorText(error));
+    });
 }
 
 void MainWindow::killSwitchError(const QString& error)
@@ -1054,6 +1140,7 @@ void MainWindow::on_connectClicked()
     if (m_networkClient && (m_connectRequestPending || m_remoteVpnState == STATUS_CONNECTING
             || m_remoteVpnState == STATUS_CONNECTED || m_remoteVpnState == STATUS_DISCONNECTING))
         return;
+    ui->vpnErrorLabel->clear(); ui->vpnErrorLabel->hide();
     if (m_killSwitch && m_killSwitchBusy) {
         m_connectAfterKillSwitch = true;
         ui->killSwitchStatusLabel->setText(tr("Applying Kill switch — VPN connection will start next…"));

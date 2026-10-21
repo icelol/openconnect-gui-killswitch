@@ -9,8 +9,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>540</width>
-    <height>310</height>
+    <width>620</width>
+    <height>395</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -21,8 +21,8 @@
   </property>
   <property name="minimumSize">
    <size>
-    <width>540</width>
-    <height>310</height>
+    <width>600</width>
+    <height>380</height>
    </size>
   </property>
   <property name="maximumSize">
@@ -94,11 +94,43 @@
          </widget>
         </item>
         <item row="3" column="0">
-         <widget class="QPushButton" name="killSwitchOffButton">
-          <property name="text"><string>Снять блокировку OpenConnect</string></property>
-          <property name="toolTip"><string>Явно выключить блокировку, даже после ошибки включения или восстановления. Правила других программ сохраняются.</string></property>
-          <property name="autoDefault"><bool>false</bool></property>
+         <widget class="QLabel" name="serviceStatusLabel">
+          <property name="text"><string>● Служба: проверка связи…</string></property>
+          <property name="textFormat"><enum>Qt::RichText</enum></property>
+          <property name="wordWrap"><bool>true</bool></property>
          </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="vpnPhaseLabel">
+          <property name="text"><string>VPN: не подключён</string></property>
+          <property name="textFormat"><enum>Qt::PlainText</enum></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="vpnErrorLabel">
+          <property name="text"><string/></property>
+          <property name="textFormat"><enum>Qt::PlainText</enum></property>
+          <property name="wordWrap"><bool>true</bool></property>
+          <property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property>
+         </widget>
+        </item>
+        <item row="6" column="0">
+         <layout class="QHBoxLayout" name="serviceActionsLayout">
+          <item>
+           <widget class="QPushButton" name="serviceDiagnosticsButton">
+            <property name="text"><string>Диагностика службы</string></property>
+            <property name="autoDefault"><bool>false</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="killSwitchOffButton">
+            <property name="text"><string>Снять блокировку OpenConnect</string></property>
+            <property name="toolTip"><string>Явно выключить блокировку, даже после ошибки включения или восстановления. Правила других программ сохраняются.</string></property>
+            <property name="autoDefault"><bool>false</bool></property>
+           </widget>
+          </item>
+         </layout>
         </item>
         <item row="0" column="0">
          <layout class="QHBoxLayout" name="horizontalLayout_4" stretch="1,3">

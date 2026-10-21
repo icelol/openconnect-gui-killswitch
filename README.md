@@ -1,5 +1,13 @@
 # OpenConnect GUI + Kill Switch
 
+**1.1.3 adds a service health indicator.** Authenticated status is checked every
+two seconds; the indicator shows the runtime version and response latency.
+Service availability, firewall state, and the VPN connection phase are separate.
+The **Service diagnostics** button (shown as **«Диагностика службы»**) reads PF
+rules locally without a Terminal or another administrator prompt. Errors leave
+network controls accessible. Server contact, authentication replies, and tunnel
+setup use separate 30/90/60-second deadlines; each input prompt allows 120 seconds.
+
 **A macOS OpenConnect client with a system-wide kill switch, independent of Connect and Disconnect.**
 
 [Русская версия](README.ru.md) · [Releases](https://github.com/icelol/openconnect-gui-killswitch/releases) · [Architecture](docs/macos-killswitch.md)

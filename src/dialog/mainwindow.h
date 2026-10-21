@@ -31,6 +31,7 @@
 #include <QTimer>
 #include <QNetworkReply>
 #include <QProgressDialog>
+#include <QJsonObject>
 
 #ifndef _WIN32
 #include <cerrno>
@@ -128,6 +129,8 @@ private:
     friend class KillSwitchUiTest;
     void initializeNetworkClient(MacNetworkClient* client);
     void applyServiceStatus(const QJsonObject& status);
+    void updateServiceIndicator();
+    void showServiceDiagnostics();
     void gotLatestVersion(QNetworkReply *reply);
     void checkLatestVersion() const;
 
@@ -171,6 +174,9 @@ private:
     int m_remoteVpnState = -1;
     bool m_connectRequestPending = false;
     bool m_confirmedArmed = false;
+    bool m_serviceResponding = false;
+    qint64 m_serviceLatency = -1;
+    QJsonObject m_serviceStatus;
     QString m_killSwitchError;
     bool m_killSwitchBusy = false;
     bool m_connectAfterKillSwitch = false;

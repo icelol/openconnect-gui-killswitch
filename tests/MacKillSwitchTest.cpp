@@ -455,6 +455,33 @@ private slots:
         QVERIFY(!guard.verify(error));
     }
 
+    void compatibleRulesAfterTheHookDoNotPreventSystemBlocking()
+    {
+        QTemporaryDir directory; FakePf pf; QString error;
+        pf.root = "pass out all flags S/SA keep state\nanchor \"com.apple/*\" all\npass quick all\nanchor \"other.firewall\" quick all\n";
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        QVERIFY2(guard.arm(QUrl("https://203.0.113.10"), error), qPrintable(error));
+        QVERIFY(guard.isArmed()); QVERIFY(guard.verify(error));
+        const auto unchanged = pf.root;
+        QVERIFY(guard.disable(error)); QCOMPARE(pf.root, unchanged);
+        pf.root.prepend("pass quick all\n");
+        guard.requestEnabled(true);
+        QVERIFY(!guard.arm(QUrl("https://203.0.113.10"), error));
+        QVERIFY(!guard.isArmed()); QVERIFY(pf.installed.isEmpty());
+        QVERIFY(guard.verify(error)); // Confirmed OFF even if enabling was rejected.
+    }
+
+    void offVerificationDetectsOrphanedRulesInsteadOfTrustingMemory()
+    {
+        QTemporaryDir directory; FakePf pf; QString error;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        QVERIFY(guard.verify(error));
+        pf.installed = "block drop quick all label \"ocgui_ks_block\"";
+        QVERIFY(!guard.verify(error));
+        QVERIFY(error.contains("not confirmed OFF"));
+        QVERIFY(guard.disable(error)); QVERIFY(guard.verify(error));
+    }
+
     void bootUsesPinnedAddressesAndRespectsExplicitDisable()
     {
         QTemporaryDir directory;

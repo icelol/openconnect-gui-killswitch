@@ -295,6 +295,13 @@ bool MacKillSwitch::validateEnvironment(const QString& rootRules,
             hasAnchor = true;
             continue;
         }
+        // Our last quick block matches every remaining packet in the standard
+        // Apple anchor. Later root rules cannot override that decision. Preserve
+        // those rules instead of rejecting an otherwise compatible firewall.
+        if (hasAnchor) continue;
+        // A non-quick filter before our hook cannot bypass our final decision.
+        if ((value.startsWith("pass ") || value.startsWith("block "))
+            && !QRegularExpression("\\bquick\\b").match(value).hasMatch()) continue;
         // Cisco Secure Client leaves this hook even when disconnected. Its
         // contents are separately checked by checkEnvironment(). A quick
         // root anchor is never accepted.
@@ -302,7 +309,7 @@ bool MacKillSwitch::validateEnvironment(const QString& rootRules,
             || value == "anchor \"cisco.anyconnect.vpn\"")
             continue;
         // Custom root filter rules need an operator-reviewed integration.
-        error = QStringLiteral("Custom PF root rules are active; refusing to claim protection");
+        error = QStringLiteral("A PF rule before the OpenConnect hook may bypass protection; inspect service diagnostics");
         return false;
     }
     if (!hasAnchor) {
@@ -339,7 +346,8 @@ bool MacKillSwitch::checkEnvironment(QString& error)
     }
     if (!validateEnvironment(root.output, children.output, interfaces.output, error))
         return false;
-    if (root.output.contains("anchor \"cisco.anyconnect.vpn\"")) {
+    if (root.output.indexOf("anchor \"cisco.anyconnect.vpn\"") >= 0
+        && root.output.indexOf("anchor \"cisco.anyconnect.vpn\"") < root.output.indexOf("anchor \"com.apple/*\"")) {
         const auto cisco = run({"-a", "cisco.anyconnect.vpn", "-sr"});
         const auto nested = run({"-a", "cisco.anyconnect.vpn", "-s", "Anchors"});
         // An empty Cisco hook is harmless. Reject nested or quick passing
@@ -834,8 +842,14 @@ bool MacKillSwitch::disableUnlocked(QString& error)
 bool MacKillSwitch::verifyUnlocked(QString& error)
 {
     error.clear();
-    if (!m_armed)
+    if (!m_armed) {
+        const auto actual = run({"-a", anchor(), "-sr"});
+        if (actual.exitCode || !filterRules(actual.output).isEmpty()) {
+            error = "OpenConnect blocking is not confirmed OFF; inspect service diagnostics or disable explicitly";
+            return false;
+        }
         return true;
+    }
     if (!m_policy.addresses.isEmpty()
         && !m_expectedRules.contains("user = 0") && !m_expectedRules.contains("user = root")) {
         error = "Legacy firewall policy requires the root-only gateway upgrade";
@@ -861,6 +875,22 @@ bool MacKillSwitch::verify(QString& error)
 {
     QMutexLocker lock(&m_mutex);
     return verifyUnlocked(error);
+}
+
+QJsonObject MacKillSwitch::diagnostics()
+{
+    // Read-only and available over the authenticated local socket. No journal,
+    // PF enable token, profile, credentials, or environment is disclosed.
+    QJsonObject report;
+    const QList<QPair<QString, QStringList>> commands{
+        {"rootRules", {"-sr"}}, {"childAnchors", {"-a", "com.apple", "-s", "Anchors"}},
+        {"interfaces", {"-v", "-s", "Interfaces"}}};
+    for (const auto& command : commands) {
+        const auto result = run(command.second);
+        report.insert(command.first, result.output.left(6000));
+        if (result.exitCode) report.insert(command.first + "Error", result.error.left(1000));
+    }
+    return report;
 }
 
 bool MacKillSwitch::verifySavedState(QString& error)

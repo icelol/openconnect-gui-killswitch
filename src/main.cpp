@@ -96,6 +96,7 @@ int main(int argc, char* argv[])
     for (int i = 1; i < argc; ++i) {
         const auto arg = QString::fromLocal8Bit(argv[i]);
         if (arg == "--service-status") return queryNetworkServiceStatus(argc, argv);
+        if (arg == "--service-diagnostics") return queryNetworkServiceDiagnostics(argc, argv);
         if (arg == "--service-ready") return queryNetworkServiceStatus(argc, argv, false);
         if (arg == "--service-disable") return disableNetworkServiceProtection(argc, argv);
         if (arg == "--network-service") return runNetworkService(argc, argv);

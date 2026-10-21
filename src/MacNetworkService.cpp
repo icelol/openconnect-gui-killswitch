@@ -3,6 +3,7 @@
 #include "MacBootGuard.h"
 #include "MacPfStates.h"
 #include "VpnProgress.h"
+#include "config.h"
 #include "server_storage.h"
 #include "vpninfo.h"
 #include <QCoreApplication>
@@ -51,15 +52,24 @@ ServiceVpnSession::ServiceVpnSession(MacKillSwitch* guard, const QJsonObject& pr
     m_connectDeadline.setParent(this);
     m_connectDeadline.setObjectName("vpnConnectDeadline");
     m_connectDeadline.setSingleShot(true);
-    m_connectDeadline.setInterval(20000);
+    m_connectDeadline.setInterval(30000);
     connect(&m_connectDeadline, &QTimer::timeout, this, [this] {
         if (m_cancelled || m_connected || awaitingInput()) return;
-        error("VPN connection timed out before login completed. Check the network/TLS settings and the connection log.");
+        error(m_phase == "authenticating"
+            ? "VPN server did not complete authentication within 90 seconds. Password acceptance was not confirmed."
+            : m_phase == "tunnel"
+            ? "VPN tunnel setup timed out after authentication."
+            : "VPN connection timed out while contacting the login server.");
         cancel();
     });
     connect(this, &ServiceVpnSession::notification, this, [this](const QJsonObject& event) {
         const auto kind = event.value("event").toString();
         if (kind == "auth" || kind == "connected" || kind == "error") m_connectDeadline.stop();
+        if (kind == "phase") {
+            m_phase = event.value("phase").toString();
+            if (m_cancelled || m_connected || awaitingInput()) return;
+            m_connectDeadline.start(m_phase == "authenticating" ? 90000 : m_phase == "tunnel" ? 60000 : 30000);
+        }
     });
     m_connectDeadline.start();
 }
@@ -69,6 +79,7 @@ ServiceVpnSession::~ServiceVpnSession() { cancel(); wait(); }
 void ServiceVpnSession::cancel()
 {
     m_cancelled = true;
+    QMetaObject::invokeMethod(&m_connectDeadline, "stop", Qt::AutoConnection);
     QMutexLocker lock(&m_lock);
     if (m_fd >= 0) { const char cmd = OC_CMD_CANCEL; ::write(m_fd, &cmd, 1); }
     m_answerReady.wakeAll();
@@ -99,7 +110,10 @@ bool ServiceVpnSession::answer(const QString& challenge, bool accepted, const QS
     }
     m_answered = true;
     m_answerReady.wakeAll();
-    if (accepted) m_connectDeadline.start();
+    if (accepted) {
+        m_phase = "authenticating";
+        m_connectDeadline.start(90000);
+    }
     return true;
 }
 
@@ -157,6 +171,11 @@ void ServiceVpnSession::progress(int level, const QString& message)
     emit notification({{"event", "progress"}, {"message", safe}, {"level", level}});
 }
 
+void ServiceVpnSession::phase(const QString& phase)
+{
+    if (!m_cancelled) emit notification({{"event", "phase"}, {"phase", phase}});
+}
+
 void ServiceVpnSession::run()
 {
     auto profile = new StoredServer;
@@ -199,6 +218,7 @@ MacNetworkService::MacNetworkService(MacKillSwitch* guard, uint allowedUid, cons
     : QObject(parent), m_guard(guard), m_allowedUid(allowedUid), m_socketPath(socket),
       m_gateway(initialGateway), m_desired(guard->isRequested())
 {
+    m_uptime.start(); m_phaseTime.start();
     connect(&m_server, &QLocalServer::newConnection, this, &MacNetworkService::accept);
     connect(&m_monitor, &QTimer::timeout, this, [this] {
         if (m_session && m_vpnState == "connected") m_session->requestStats();
@@ -221,7 +241,7 @@ MacNetworkService::~MacNetworkService()
 {
     m_monitor.stop();
     if (m_session) { m_session->cancel(); m_session->wait(); }
-    m_firewallTask.waitForFinished(); m_verification.waitForFinished();
+    m_firewallTask.waitForFinished(); m_verification.waitForFinished(); m_diagnostics.waitForFinished();
     for (auto client : m_clients) { client->disconnect(this); client->abort(); }
     m_clients.clear();
     m_server.close();
@@ -288,10 +308,13 @@ QJsonObject MacNetworkService::status() const
 {
     auto vpn = m_vpnDetails;
     vpn.insert("state", m_vpnState);
-    return {{"schema", 1}, {"capabilities", QJsonObject{{"explicitOff", true}}}, {"revision", QString::number(m_revision)},
+    vpn.insert("phaseElapsedMs", QString::number(m_phaseTime.elapsed()));
+    return {{"schema", 1}, {"capabilities", QJsonObject{{"explicitOff", true}, {"diagnostics", true}, {"heartbeat", true}}},
+        {"service", QJsonObject{{"version", PROJECT_VERSION}, {"pid", QString::number(QCoreApplication::applicationPid())},
+            {"uptimeMs", QString::number(m_uptime.elapsed())}}}, {"revision", QString::number(m_revision)},
         {"firewall", QJsonObject{{"requested", m_desired}, {"armed", m_guard->isArmed()},
             {"verified", m_verified}, {"busy", m_busy}, {"recoveryRequired", m_recoveryRequired},
-            {"tunnel", m_guard->hasTunnel()}, {"error", m_error}}},
+            {"tunnel", m_guard->hasTunnel()}, {"error", m_error}, {"errorAction", m_firewallErrorAction}}},
         {"vpn", vpn}};
 }
 
@@ -353,6 +376,18 @@ void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& reques
     if (!request.value("params").isObject()) { reply(socket, id, {}, "params must be an object"); return; }
     QString error;
     if (method == "status") { reply(socket, id, status()); return; }
+    if (method == "diagnostics") {
+        if (m_diagnostics.isRunning()) { reply(socket, id, {}, "Diagnostics are already running"); return; }
+        auto watcher = new QFutureWatcher<QJsonObject>(this);
+        QPointer<QLocalSocket> client(socket);
+        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, client, id] {
+            const auto result = watcher->result(); watcher->deleteLater();
+            if (client) reply(client, id, result);
+        });
+        m_diagnostics = QtConcurrent::run([this] { return m_guard->diagnostics(); });
+        watcher->setFuture(m_diagnostics);
+        return;
+    }
     if (method == "firewall") {
         const auto gateway = params.value("gateway").toString(m_gateway);
         if (!supportedKeys(params, {"enabled", "gateway"})) { reply(socket, id, {}, "Unsupported firewall parameter"); return; }
@@ -384,6 +419,7 @@ void MacNetworkService::dispatch(QLocalSocket* socket, const QJsonObject& reques
         }
         m_gateway = params.value("gateway").toString();
         m_pendingProfile = params; m_owner = socket; m_vpnState = "connecting";
+        m_vpnDetails = {{"phase", "preparing"}}; m_phaseTime.restart();
         reply(socket, id, {{"accepted", true}}); broadcast();
         if (!m_busy) startVpn();
         return;
@@ -410,12 +446,14 @@ void MacNetworkService::changeFirewall()
     const bool enabled = m_desired;
     const auto generation = m_generation;
     const auto gateway = m_gateway;
-    auto watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, generation] {
-        m_error = watcher->result(); watcher->deleteLater(); m_busy = false;
+    auto watcher = new QFutureWatcher<FirewallResult>(this);
+    connect(watcher, &QFutureWatcher<FirewallResult>::finished, this, [this, watcher, generation, enabled] {
+        const auto result = watcher->result();
+        m_error = result.error; watcher->deleteLater(); m_busy = false;
         if (generation != m_generation) { changeFirewall(); return; }
-        m_verified = m_error.isEmpty();
-        m_recoveryRequired = !m_error.isEmpty();
+        m_verified = result.verified;
+        m_recoveryRequired = !m_verified || (!enabled && !m_error.isEmpty());
+        m_firewallErrorAction = m_error.isEmpty() ? QString() : enabled ? "enable" : "disable";
         if (!m_error.isEmpty()) { m_desired = m_guard->isArmed(); m_guard->requestEnabled(m_desired); }
         std::fprintf(stderr, "Firewall result: requested=%d armed=%d verified=%d\n",
             int(m_desired), int(m_guard->isArmed()), int(m_verified));
@@ -423,9 +461,12 @@ void MacNetworkService::changeFirewall()
         if (!m_pendingProfile.isEmpty()) startVpn();
     });
     m_firewallTask = QtConcurrent::run([this, enabled, gateway] {
-        QString error;
-        if (enabled) m_guard->arm(QUrl(gateway), error); else m_guard->disable(error);
-        return error;
+        FirewallResult result;
+        if (enabled) m_guard->arm(QUrl(gateway), result.error); else m_guard->disable(result.error);
+        QString verification;
+        result.verified = m_guard->verify(verification);
+        if (result.error.isEmpty()) result.error = verification;
+        return result;
     });
     watcher->setFuture(m_firewallTask);
     broadcast();
@@ -448,11 +489,17 @@ void MacNetworkService::sessionEvent(const QJsonObject& event)
 {
     const auto kind = event.value("event").toString();
     if (kind == "auth") {
+        m_vpnDetails.insert("phase", "credentials"); m_phaseTime.restart(); broadcast();
         if (m_owner) send(m_owner, event); else if (m_session) m_session->cancel();
     } else if (kind == "progress") {
         if (m_owner) send(m_owner, event);
+    } else if (kind == "phase") {
+        m_vpnDetails.insert("phase", event.value("phase")); m_phaseTime.restart(); broadcast();
     } else if (kind == "connected") {
         m_vpnDetails = event; m_vpnDetails.remove("event"); m_vpnState = "connected"; broadcast();
+    } else if (kind == "error") {
+        m_vpnDetails.insert("phase", "cancelling"); m_vpnState = "disconnecting"; m_phaseTime.restart(); broadcast();
+        if (m_owner) send(m_owner, event);
     } else if (kind == "firewallError") {
         if (!event.value("message").toString().isEmpty()) {
             m_error = event.value("message").toString(); m_verified = false;

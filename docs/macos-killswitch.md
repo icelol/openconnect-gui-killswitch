@@ -45,6 +45,25 @@ before another session is established.
 
 ## Firewall policy
 
+The GUI polls authenticated status every two seconds. A missing heartbeat is
+reported after six seconds and the socket reconnects without replaying mutations.
+Version, PID, uptime, connection phase and elapsed phase time are separate from
+the confirmed PF state. Errors are inline so OFF and Cancel remain accessible.
+`--service-diagnostics` and the diagnostics button read bounded root rules, Apple
+child anchors and interface flags locally. They do not expose the enable reference,
+recovery journal or credentials and do not upload reports. Queries run outside
+the service control thread. Reports can contain local network policy.
+
+Connection deadlines are 30 seconds for server contact, 90 after an authentication
+form is submitted, and 60 for tunnel setup. Each user prompt allows 120 seconds.
+A timeout does not confirm password acceptance or rejection. Cancellation leaves
+service control available while the library finishes connection cleanup.
+
+Non-quick root filters before the standard Apple hook and rules after it are
+compatible: the owned anchor's final quick block decides every remaining packet.
+Prior unknown anchors or quick bypasses remain rejected. OFF is confirmed by
+reading back the owned anchor as empty, including after a rejected ON operation.
+
 The application owns `com.apple/000.openconnect-gui-killswitch` and never disables
 PF globally. Existing system and other-client rules are inspected; incompatible
 quick bypasses are reported rather than silently replacing another product's policy.

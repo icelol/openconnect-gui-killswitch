@@ -15,4 +15,5 @@ public:
     virtual void error(const QString& message) = 0;
     virtual void firewallError(const QString& message) = 0;
     virtual void progress(int, const QString&) { }
+    virtual void phase(const QString&) { }
 };

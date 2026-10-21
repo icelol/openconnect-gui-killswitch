@@ -3,6 +3,7 @@
 #include "MacKillSwitch.h"
 #include "VpnCallbacks.h"
 #include <QFuture>
+#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -34,6 +35,7 @@ public:
     void error(const QString&) override;
     void firewallError(const QString&) override;
     void progress(int, const QString&) override;
+    void phase(const QString&) override;
 signals:
     void notification(const QJsonObject& event);
 protected:
@@ -47,6 +49,7 @@ private:
     bool m_answered = false, m_accepted = false;
     std::atomic<bool> m_reportedError{false}, m_connected{false};
     QTimer m_connectDeadline;
+    QString m_phase = "preparing";
     int m_fd = -1;
     std::atomic<bool> m_cancelled{false};
 };
@@ -65,6 +68,7 @@ signals:
     void changed();
 private:
     friend class KillSwitchUiTest;
+    struct FirewallResult { QString error; bool verified = false; };
     void accept();
     void dispatch(QLocalSocket*, const QJsonObject&);
     void reply(QLocalSocket*, const QJsonValue& id, const QJsonObject& result, const QString& error = {});
@@ -82,8 +86,12 @@ private:
     QJsonObject m_pendingProfile, m_vpnDetails;
     ServiceVpnSession* m_session = nullptr;
     QString m_vpnState = "disconnected", m_error, m_gateway;
+    QString m_firewallErrorAction;
     bool m_desired = false, m_busy = false, m_verified = false, m_recoveryRequired = false;
     quint64 m_generation = 0, m_revision = 0;
-    QFuture<QString> m_firewallTask, m_verification;
+    QFuture<FirewallResult> m_firewallTask;
+    QFuture<QString> m_verification;
     QTimer m_monitor;
+    QElapsedTimer m_uptime, m_phaseTime;
+    QFuture<QJsonObject> m_diagnostics;
 };

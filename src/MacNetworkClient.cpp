@@ -12,6 +12,10 @@ MacNetworkClient::MacNetworkClient(QObject* parent, QString socketPath, uint exp
       m_expectedUid(expectedUid)
 {
     m_socket.setReadBufferSize(65537);
+    m_clock.start();
+    m_poll.setInterval(2000);
+    connect(&m_poll, &QTimer::timeout, this, &MacNetworkClient::poll);
+    m_poll.start();
     m_retry.setInterval(1000);
     connect(&m_retry, &QTimer::timeout, this, &MacNetworkClient::start);
     connect(&m_socket, &QLocalSocket::connected, this, [this] {
@@ -22,20 +26,21 @@ MacNetworkClient::MacNetworkClient(QObject* parent, QString socketPath, uint exp
             return;
         }
         m_authenticated = true; m_retry.stop();
-        request("status", {}, [this](const QJsonObject& state, const QString& error) {
-            if (error.isEmpty()) emit statusChanged(state); else emit unavailable(error);
-        });
+        poll();
     });
     connect(&m_socket, &QLocalSocket::readyRead, this, &MacNetworkClient::read);
     connect(&m_socket, &QLocalSocket::disconnected, this, [this] {
         m_authenticated = false;
+        m_heartbeat = 0; m_sent.clear();
         auto replies = std::move(m_replies); m_replies.clear();
         for (auto callback : replies) if (callback) callback({}, "Потеряна связь с системной службой");
         emit unavailable("Связь со службой потеряна. Состояние защиты не подтверждено.");
+        emit healthChanged(false, -1);
         m_retry.start();
     });
     connect(&m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
         m_authenticated = false;
+        emit healthChanged(false, -1);
         emit unavailable("Системная служба недоступна. Установите обновление приложения.");
         if (!m_retry.isActive()) m_retry.start();
     });
@@ -46,9 +51,37 @@ MacNetworkClient::~MacNetworkClient()
     // QLocalSocket emits disconnected while its destructor closes the socket.
     // Stop callbacks before member containers or the owning window disappear.
     m_retry.stop();
+    m_poll.stop();
     m_socket.disconnect(this);
     m_socket.abort();
     m_replies.clear();
+    m_sent.clear();
+}
+
+void MacNetworkClient::loseHealth(const QString& error)
+{
+    emit healthChanged(false, -1);
+    emit unavailable(error);
+    m_socket.abort(); // Reconnect; never replay an unconfirmed mutation.
+    if (!m_retry.isActive()) m_retry.start();
+}
+
+void MacNetworkClient::poll()
+{
+    if (!available()) return;
+    for (auto it = m_sent.cbegin(); it != m_sent.cend(); ++it) {
+        if (m_clock.elapsed() - it.value() >= (it.key() == m_heartbeat ? 6000 : 25000)) {
+            loseHealth("Служба не ответила за 6 секунд. Последнее состояние сохранено; выполняется переподключение.");
+            return;
+        }
+    }
+    if (m_heartbeat) return;
+    m_heartbeat = m_nextId;
+    request("status", {}, [this](const QJsonObject& state, const QString& error) {
+        m_heartbeat = 0;
+        if (error.isEmpty() && state.value("schema").toInt() == 1) emit statusChanged(state);
+        else if (!error.isEmpty()) emit unavailable(error);
+    });
 }
 
 void MacNetworkClient::start()
@@ -76,6 +109,7 @@ void MacNetworkClient::request(const QString& method, const QJsonObject& params,
         return;
     }
     if (reply) m_replies.insert(id, std::move(reply));
+    m_sent.insert(id, m_clock.elapsed());
     m_socket.write(message);
 }
 
@@ -88,7 +122,12 @@ void MacNetworkClient::read()
         if (error.error != QJsonParseError::NoError || !document.isObject()) { m_socket.abort(); return; }
         const auto message = document.object();
         if (message.contains("id")) {
-            auto callback = m_replies.take(message.value("id").toInt(-1));
+            const auto id = message.value("id").toInt(-1);
+            if (m_sent.contains(id)) {
+                const auto latency = m_clock.elapsed() - m_sent.take(id);
+                emit healthChanged(true, latency);
+            }
+            auto callback = m_replies.take(id);
             if (callback) callback(message.value("result").toObject(), message.value("error").toString());
         } else if (message.value("event") == "status") {
             emit statusChanged(message.value("status").toObject());
@@ -148,6 +187,26 @@ int disableNetworkServiceProtection(int argc, char** argv)
         std::fprintf(stderr, "OFF was not confirmed. Use Recover Kill Switch.command for administrator recovery.\n");
         app.exit(1);
     });
+    client.start();
+    return app.exec();
+}
+
+int queryNetworkServiceDiagnostics(int argc, char** argv)
+{
+    QCoreApplication app(argc, argv);
+    MacNetworkClient client;
+    bool sent = false;
+    QObject::connect(&client, &MacNetworkClient::statusChanged, &app, [&](const QJsonObject& state) {
+        if (sent) return;
+        sent = true;
+        client.request("diagnostics", {}, [&, state](const QJsonObject& result, const QString& error) {
+            if (!error.isEmpty()) { std::fprintf(stderr, "%s\n", qPrintable(error)); app.exit(1); return; }
+            auto report = state; report.insert("diagnostics", result);
+            const auto bytes = QJsonDocument(report).toJson(QJsonDocument::Indented);
+            std::printf("%s", bytes.constData()); app.exit(0);
+        });
+    });
+    QTimer::singleShot(25000, &app, [&app] { app.exit(1); });
     client.start();
     return app.exec();
 }

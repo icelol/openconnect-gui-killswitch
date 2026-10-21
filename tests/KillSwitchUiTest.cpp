@@ -15,6 +15,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QProcess>
+#include <QMessageBox>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtTest>
 #include <unistd.h>
@@ -342,7 +343,7 @@ private slots:
             QVERIFY(previous.arm(QUrl("https://203.0.113.10"), error));
         }
         // Another app changes PF while this client's protection was persisted ON.
-        pf.root += "\npass quick all";
+        pf.root.prepend("pass quick all\n");
         MacKillSwitch guard(std::ref(pf), state, boot);
         QVERIFY(!guard.restoreBootProtection(error));
         QVERIFY(!error.isEmpty());
@@ -367,7 +368,7 @@ private slots:
         QVERIFY(MacKillSwitch::readBootPolicy(boot, policy, enabled, error));
         QVERIFY(!enabled);
         // Recovery did not replace the other application's root policy.
-        QVERIFY(pf.root.endsWith("pass quick all"));
+        QVERIFY(pf.root.startsWith("pass quick all"));
     }
 
     void explicitOffWorksWithUncheckedToggleAfterFailedRecovery()
@@ -516,6 +517,81 @@ private slots:
         for (const auto& event : events) QVERIFY(event.first().toJsonObject().value("event").toString() != "error");
         QVERIFY(session.answer(challenge, false, {}));
         QTRY_VERIFY(pending.isFinished()); QVERIFY(!pending.result());
+    }
+
+    void answeringPasswordAllowsSlowServerAndShowsAuthenticationPhase()
+    {
+        QTemporaryDir directory; Firewall pf;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json"));
+        ServiceVpnSession session(&guard, {});
+        QSignalSpy events(&session, &ServiceVpnSession::notification);
+        auto pending = QtConcurrent::run([&] { QString answer; return session.input("Password", "Password", {}, true, {}, {}, answer); });
+        QTRY_VERIFY(!events.isEmpty());
+        const auto challenge = events.first().first().toJsonObject().value("challenge").toString();
+        QVERIFY(session.answer(challenge, true, "non-secret-regression-value"));
+        auto deadline = session.findChild<QTimer*>("vpnConnectDeadline"); QVERIFY(deadline);
+        QCOMPARE(deadline->interval(), 90000);
+        QVERIFY(deadline->isActive());
+        QTRY_VERIFY(pending.isFinished()); QVERIFY(pending.result());
+        session.phase("tunnel");
+        QTRY_COMPARE(deadline->interval(), 60000);
+        session.cancel(); QVERIFY(!deadline->isActive());
+    }
+
+    void serviceIndicatorPollsRecoversAndVpnErrorsLeaveControlsAccessible()
+    {
+        QTemporaryDir directory; Firewall pf; QString error;
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
+        const auto socket = directory.filePath("control.sock");
+        MacNetworkService service(&guard, getuid(), socket);
+        QVERIFY(service.start(error)); service.m_monitor.stop();
+        auto client = new MacNetworkClient(nullptr, socket, getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client); window.show();
+        auto indicator = window.findChild<QLabel*>("serviceStatusLabel"); QVERIFY(indicator);
+        QTRY_VERIFY(window.m_serviceResponding);
+        QVERIFY(indicator->text().contains("Служба: отвечает"));
+        QVERIFY(indicator->text().contains(service.status().value("service").toObject().value("version").toString()));
+        QSignalSpy snapshots(client, &MacNetworkClient::statusChanged);
+        const auto before = snapshots.count();
+        client->poll(); QTRY_VERIFY(snapshots.count() > before);
+        service.m_vpnState = "connecting"; service.m_vpnDetails = {{"phase", "authenticating"}}; service.broadcast();
+        QTRY_VERIFY(window.findChild<QLabel*>("vpnPhaseLabel")->text().contains("авторизации"));
+        emit window.connectionErrorChanged("VPN server did not complete authentication within 90 seconds.");
+        QTRY_VERIFY(window.findChild<QLabel*>("vpnErrorLabel")->isVisible());
+        QVERIFY(!window.findChild<QMessageBox*>());
+        QVERIFY(window.findChild<QCheckBox*>("killSwitchCheckBox")->isEnabled());
+        QVERIFY(window.findChild<QPushButton*>("killSwitchOffButton")->isEnabled());
+        // Simulate a live socket that has stopped answering its heartbeat.
+        client->m_sent.insert(900001, -7000); client->m_heartbeat = 900001;
+        client->poll();
+        QVERIFY(!window.m_serviceResponding);
+        QVERIFY(indicator->text().contains("нет ответа"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_serviceResponding, 4000);
+        QVERIFY(indicator->text().contains("Служба: отвечает"));
+    }
+
+    void failedEnableLeavesVerifiedOffAndDiagnosticsCannotExecuteCommands()
+    {
+        QTemporaryDir directory; Firewall pf; QString error;
+        pf.root.prepend("pass quick all\n");
+        MacKillSwitch guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
+        const auto socket = directory.filePath("control.sock");
+        MacNetworkService service(&guard, getuid(), socket); QVERIFY(service.start(error));
+        auto client = new MacNetworkClient(nullptr, socket, getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client); window.show();
+        QTRY_VERIFY(window.m_serviceResponding);
+        client->request("firewall", {{"enabled", true}, {"gateway", "https://203.0.113.10"}});
+        QTRY_VERIFY(!service.status().value("firewall").toObject().value("error").toString().isEmpty());
+        const auto state = service.status().value("firewall").toObject();
+        QVERIFY(state.value("verified").toBool()); QVERIFY(!state.value("armed").toBool());
+        QVERIFY(!state.value("recoveryRequired").toBool());
+        QTRY_VERIFY(window.findChild<QLabel*>("killSwitchStatusLabel")->text().startsWith("Блокировка выключена"));
+        QJsonObject diagnostic;
+        client->request("diagnostics", {{"command", "not-executed"}}, [&](const QJsonObject& value, const QString&) { diagnostic = value; });
+        QTRY_VERIFY(diagnostic.contains("rootRules"));
+        QCOMPARE(diagnostic.value("rootRules").toString(), pf.root);
+        QVERIFY(!QJsonDocument(diagnostic).toJson().contains("token"));
+        QVERIFY(pf.installed.isEmpty());
     }
 };
 

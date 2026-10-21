@@ -189,6 +189,7 @@ static int process_auth_form(void* privdata, struct oc_auth_form* form)
                 && vpn->is_username_form_option(form, opt)) {
                 openconnect_set_option_value(opt,
                     vpn->ss->get_username().toUtf8().data());
+                vpn->form_attempt++;
                 empty = 0;
                 continue;
             }
@@ -219,6 +220,7 @@ static int process_auth_form(void* privdata, struct oc_auth_form* form)
                ) {
                 openconnect_set_option_value(opt,
                     vpn->ss->get_password().toUtf8().data());
+                vpn->form_pass_attempt++;
                 empty = 0;
                 continue;
             }
@@ -248,6 +250,7 @@ static int process_auth_form(void* privdata, struct oc_auth_form* form)
     }
     last_form_empty = empty;
 
+    if (vpn->callbacks) vpn->callbacks->phase("authenticating");
     return OC_FORM_RESULT_OK;
 fail:
     return OC_FORM_RESULT_CANCELLED;
@@ -383,6 +386,7 @@ static QByteArray native_path(const QString& path) {
 static void setup_tun_vfn(void* privdata)
 {
     VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
+    if (vpn->callbacks) vpn->callbacks->phase("tunnel");
 
     QByteArray vpncScriptFullPath;
     QByteArray interface_name;
@@ -486,7 +490,9 @@ void VpnInfo::initialize(QString name, StoredServer* ss, MainWindow* m, VpnCallb
         loglevel = m ? m->get_log_level() : PRG_INFO;
     }
 
-    openconnect_set_loglevel(vpninfo, loglevel);
+    // Collect only numeric HTTP statuses from debug progress in the service.
+    // Header/body dumps never reach the GUI or logger.
+    openconnect_set_loglevel(vpninfo, callbacks ? PRG_DEBUG : loglevel);
 
     this->cmd_fd = openconnect_setup_cmd_pipe(vpninfo);
     if (this->cmd_fd == INVALID_SOCKET) {
@@ -629,6 +635,7 @@ int VpnInfo::connect()
 #endif
     openconnect_set_reported_os(vpninfo, osName.toStdString().c_str());
 
+    if (callbacks) callbacks->phase("login");
     ret = openconnect_obtain_cookie(vpninfo);
     if (ret != 0) {
         this->last_err = authFormSeen ? QObject::tr("VPN authentication did not complete.")
@@ -637,6 +644,7 @@ int VpnInfo::connect()
         return ret;
     }
 
+    if (callbacks) callbacks->phase("tunnel");
     ret = openconnect_make_cstp_connection(vpninfo);
     if (ret != 0) {
         this->last_err = QObject::tr("Error establishing the CSTP channel");
@@ -838,6 +846,11 @@ void VpnInfo::logVpncScriptOutput()
 
 void VpnInfo::recordProgress(int level, const QString& message)
 {
+    if (callbacks && level > PRG_INFO) {
+        const auto status = QRegularExpression("^Got HTTP response: HTTP/1\\.[01] ([1-5][0-9]{2})(?:\\s|$)").match(message);
+        if (status.hasMatch()) callbacks->progress(PRG_INFO, QString("HTTP response: %1").arg(status.captured(1)));
+        return;
+    }
     const auto safe = safeVpnProgress(message);
     if (safe.isEmpty()) return;
     if (level == PRG_ERR) m_lastProgressError = safe.left(1024);

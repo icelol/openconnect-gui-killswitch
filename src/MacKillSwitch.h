@@ -4,6 +4,7 @@
 #include <QMutex>
 #include <QStringList>
 #include <QUrl>
+#include <QJsonObject>
 #include <functional>
 #include <memory>
 #include <atomic>
@@ -67,6 +68,7 @@ public:
     bool isArmed() const;
     bool hasTunnel() const;
     bool checkGatewayRoute(QString& error) const;
+    QJsonObject diagnostics();
     int resolve(const char* node, const char* service,
         const struct addrinfo* hints, struct addrinfo** result);
     static int resolvePinned(const QString& host, const QStringList& addresses,
