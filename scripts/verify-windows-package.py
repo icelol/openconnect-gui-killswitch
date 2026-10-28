@@ -24,4 +24,29 @@ assert (stage/'wintun.dll').is_file()
 assert b'asInvoker' in (stage/'openconnect-gui.exe').read_bytes(), 'GUI must not request administrator elevation'
 assert (stage/'ca-bundle.crt').read_bytes().count(b'BEGIN CERTIFICATE') > 20
 assert not list(stage.rglob('*.pfx')) and not list(stage.rglob('*.p12'))
-print(json.dumps({'native_x64_pe_files':count,'platform_plugin':'passed','public_ca_bundle':'passed'},indent=2))
+
+# Several upstream MSYS2 packages install no license files. Their PACKAGE.txt
+# metadata and recipe URLs are not substitutes for the original notices.
+provenance = json.loads((stage/'DEPENDENCIES.json').read_text(encoding='utf-8'))
+notices = json.loads((stage/'licenses/windows-dependency-notices.json').read_text(encoding='utf-8'))
+required = {'gmp', 'gnutls', 'icu', 'libidn2', 'lz4', 'nettle', 'p11-kit'}
+assert notices['schema'] == 1
+assert {entry['package'] for entry in notices['dependencies']} == required
+notice_count = 0
+for entry in notices['dependencies']:
+    package = 'mingw-w64-ucrt-x86_64-' + entry['package']
+    installed = provenance['packages'][package]['version']
+    # An MSYS2 packaging-only revision can change without changing the upstream
+    # notices. A new upstream version requires reviewing and refreshing them.
+    assert re.fullmatch(re.escape(package + ' ' + entry['upstream_version']) + r'-[0-9]+', installed), \
+        'Review upstream notices after dependency update: ' + package
+    assert entry['upstream_source'].startswith('https://') and entry['notices']
+    for notice in entry['notices']:
+        name = notice['file']
+        assert pathlib.PurePath(name).name == name and name != 'PACKAGE.txt'
+        data = (stage/'licenses'/name).read_bytes().replace(b'\r\n', b'\n')
+        assert data and hashlib.sha256(data).hexdigest() == notice['sha256'], \
+            'Missing or altered upstream notice: ' + name
+        notice_count += 1
+print(json.dumps({'native_x64_pe_files':count,'platform_plugin':'passed','public_ca_bundle':'passed',
+    'upstream_notices':'passed','verified_upstream_notice_files':notice_count},indent=2))

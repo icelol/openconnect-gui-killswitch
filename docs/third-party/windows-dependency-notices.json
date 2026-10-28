@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "description": "Exact upstream license and author notices for dependencies whose MSYS2 binary packages omit notice files. Full package versions and build recipe URLs are in DEPENDENCIES.json. This manifest does not replace corresponding source availability.",
+  "hash_policy": "sha256 of upstream bytes; when checking Git text checkouts normalize CRLF to LF",
+  "dependencies": [
+    {
+      "package": "gmp",
+      "upstream_version": "6.3.0",
+      "upstream_source": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+      "source_sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+      "notices": [
+        {
+          "file": "gmp-6.3.0-COPYING.txt",
+          "upstream_path": "gmp-6.3.0/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "file": "gmp-6.3.0-COPYING.LESSERv3.txt",
+          "upstream_path": "gmp-6.3.0/COPYING.LESSERv3",
+          "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+        },
+        {
+          "file": "gmp-6.3.0-AUTHORS.txt",
+          "upstream_path": "gmp-6.3.0/AUTHORS",
+          "sha256": "da5870e2f0482c5dc15b4cfed8bbfb51ce1279c8f8fc52bdb8c13c7cee949c32"
+        },
+        {
+          "file": "gmp-6.3.0-COPYINGv3.txt",
+          "upstream_path": "gmp-6.3.0/COPYINGv3",
+          "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195"
+        },
+        {
+          "file": "gmp-6.3.0-COPYINGv2.txt",
+          "upstream_path": "gmp-6.3.0/COPYINGv2",
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        }
+      ]
+    },
+    {
+      "package": "gnutls",
+      "upstream_version": "3.8.13",
+      "upstream_source": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "source_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "notices": [
+        {
+          "file": "gnutls-3.8.13-AUTHORS.txt",
+          "upstream_path": "gnutls-3.8.13/AUTHORS",
+          "sha256": "79bca1136dc515b930f2f85975c0c4c687e7d430be27a9b59113637c33b8e7a3"
+        },
+        {
+          "file": "gnutls-3.8.13-COPYING.txt",
+          "upstream_path": "gnutls-3.8.13/COPYING",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "file": "gnutls-3.8.13-COPYING.LESSERv2.txt",
+          "upstream_path": "gnutls-3.8.13/COPYING.LESSERv2",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        }
+      ]
+    },
+    {
+      "package": "libidn2",
+      "upstream_version": "2.3.8",
+      "upstream_source": "https://ftp.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz",
+      "source_sha256": "f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a",
+      "notices": [
+        {
+          "file": "libidn2-2.3.8-AUTHORS.txt",
+          "upstream_path": "libidn2-2.3.8/AUTHORS",
+          "sha256": "7719304df806ca5cd68c1f1c7e0139e0c11ed14fede560ae192d3c4d1989e839"
+        },
+        {
+          "file": "libidn2-2.3.8-COPYING.txt",
+          "upstream_path": "libidn2-2.3.8/COPYING",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "file": "libidn2-2.3.8-COPYING.LESSERv3.txt",
+          "upstream_path": "libidn2-2.3.8/COPYING.LESSERv3",
+          "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
+        },
+        {
+          "file": "libidn2-2.3.8-COPYING.unicode.txt",
+          "upstream_path": "libidn2-2.3.8/COPYING.unicode",
+          "sha256": "01d621eef165cf4d3d3dbb737aa0699178d94c6f18cf87e9dde6db3ca7790f46"
+        },
+        {
+          "file": "libidn2-2.3.8-COPYINGv2.txt",
+          "upstream_path": "libidn2-2.3.8/COPYINGv2",
+          "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+        }
+      ]
+    },
+    {
+      "package": "nettle",
+      "upstream_version": "4.0",
+      "upstream_source": "https://ftp.gnu.org/gnu/nettle/nettle-4.0.tar.gz",
+      "source_sha256": "3addbc00da01846b232fb3bc453538ea5468da43033f21bb345cb1e9073f5094",
+      "notices": [
+        {
+          "file": "nettle-4.0-AUTHORS.txt",
+          "upstream_path": "nettle-4.0/AUTHORS",
+          "sha256": "6fd91e60caa0c33dd22888b710fcfa36532bbbef00d85c78de385dcd97f7b9ee"
+        },
+        {
+          "file": "nettle-4.0-COPYING.LESSERv3.txt",
+          "upstream_path": "nettle-4.0/COPYING.LESSERv3",
+          "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
+        },
+        {
+          "file": "nettle-4.0-COPYINGv2.txt",
+          "upstream_path": "nettle-4.0/COPYINGv2",
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        },
+        {
+          "file": "nettle-4.0-COPYINGv3.txt",
+          "upstream_path": "nettle-4.0/COPYINGv3",
+          "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195"
+        }
+      ]
+    },
+    {
+      "package": "icu",
+      "upstream_version": "78.3",
+      "upstream_tag": "release-78.3",
+      "upstream_source": "https://raw.githubusercontent.com/unicode-org/icu/release-78.3/LICENSE",
+      "notices": [
+        {
+          "file": "icu-78.3-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/unicode-org/icu/release-78.3/LICENSE",
+          "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af"
+        }
+      ]
+    },
+    {
+      "package": "lz4",
+      "upstream_version": "1.10.0",
+      "upstream_tag": "v1.10.0",
+      "upstream_source": "https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/LICENSE",
+      "notices": [
+        {
+          "file": "lz4-1.10.0-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/LICENSE",
+          "sha256": "8b58c446121a109ccf32edc094bba3010a3d85e4ee3702950db55e4d3e87736c"
+        }
+      ]
+    },
+    {
+      "package": "p11-kit",
+      "upstream_version": "0.26.5",
+      "upstream_tag": "0.26.5",
+      "upstream_source": "https://github.com/p11-glue/p11-kit/releases/download/0.26.5/p11-kit-0.26.5.tar.xz",
+      "notices": [
+        {
+          "file": "p11-kit-0.26.5-AUTHORS.txt",
+          "upstream_path": "p11-kit-0.26.5/AUTHORS",
+          "sha256": "cde5ccbf5083e28d1b38333b5817be06c158fb3218f21ee5594b6125a9372591"
+        },
+        {
+          "file": "p11-kit-0.26.5-COPYING.txt",
+          "upstream_path": "p11-kit-0.26.5/COPYING",
+          "sha256": "2e1ba993904df807a10c3eda1e5c272338edc35674b679773a8b3ad460731054"
+        }
+      ],
+      "source_sha256": "f2cc09111e44bf3fea58f023180b33acea90aa82d042d6fbb623fbc5ba033bb7"
+    }
+  ]
+}
