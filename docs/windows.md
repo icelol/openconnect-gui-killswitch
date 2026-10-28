@@ -9,7 +9,9 @@ not import OpenVPN `.ovpn` or WireGuard profiles.
 
 1. Download the Windows x64 setup EXE from the project's Releases page.
 2. Run it and approve the Windows administrator prompt. Close the old GUI before
-   updating. The protected service is installed in Program Files and starts with
+   updating. If an interface is still running, setup stops before changing the
+   service or its protection and asks you to close it. The protected service is
+   installed in Program Files and starts with
    Windows. Opening the GUI at login is a separate installer option.
 3. Add your own gateway and select its matching protocol. For Cisco AnyConnect or
    ocserv choose **Cisco AnyConnect or OpenConnect**. Username/password input is
@@ -49,9 +51,11 @@ Recovery stops this service, removes this project's WFP filters and starts the
 service again with OFF saved. It preserves application profiles and other
 applications' firewall policies. It does not globally reset Windows Firewall.
 
-Remove the application using Windows **Installed apps**, or the **Remove** entry
+Close the interface, then remove the application using Windows **Installed apps**,
+or the **Remove** entry
 in its Start menu folder. Removal confirms that its own filtering is cleared
-before deleting the runtime and protected service state.
+before deleting the runtime and protected service state. If the interface is
+still open, removal stops before changing the service or its protection.
 
 ## Build
 

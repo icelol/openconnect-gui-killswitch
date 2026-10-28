@@ -103,10 +103,12 @@ def udp_dns():
     except OSError:return False
 
 installer=next((root/'dist').glob('*Setup-windows-x64-*.exe'))
-report={'platform':sys.getwindowsversion().build,'version':(root/'VERSION').read_text().strip()}
+report={'platform':sys.getwindowsversion().build,'version':(root/'VERSION').read_text().strip(),
+        'commit':os.environ['GITHUB_SHA'],
+        'ci_run':'https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']}
 marker=root/'dist/windows-watchdog-finished'
 marker.unlink(missing_ok=True)
-watchdog=None;pipe=None;existing=None;fixture=None
+watchdog=None;pipe=None;existing=None;fixture=None;gui=None
 foreign='OpenConnect-CI-Unrelated-Policy-78196d3a'
 try:
     run(installer,'/S',timeout=90)
@@ -121,7 +123,7 @@ try:
     clean={**os.environ,'PATH':str(pathlib.Path(os.environ['SystemRoot'])/'System32')}
     gui=subprocess.Popen([str(runtime)],env=clean)
     time.sleep(3);assert gui.poll() is None,'Installed GUI exited at startup'
-    gui.terminate();gui.wait(10)
+    gui.terminate();gui.wait(10);gui=None
     report['packaged_gui_startup']='passed'
     run('powershell.exe','-NoProfile','-NonInteractive','-Command',
         "New-NetFirewallRule -Name '"+foreign+"' -DisplayName 'Unrelated CI rule' -Direction Outbound -Action Block -Protocol TCP -RemoteAddress 192.0.2.123 | Out-Null")
@@ -214,11 +216,30 @@ try:
     run(runtime,'--install-service');run(runtime,'--service-ready')
     pipe=Pipe();pipe.settled(True)
     report['service_restart_preserves_on']='passed'
+    # An open GUI locks its EXE/DLLs. Refuse an update before stopping the
+    # service, preserving the current PID, protection and installed files.
+    service_pid=pipe.request('status')['service']['pid']
+    gui=subprocess.Popen([str(runtime)],env=clean)
+    time.sleep(3);assert gui.poll() is None
+    guarded=subprocess.run([str(installer),'/S'],capture_output=True,text=True,errors='replace',timeout=45)
+    assert guarded.returncode!=0,'Update accepted a running interface'
+    run(runtime,'--service-ready')
+    assert pipe.settled(True)['service']['pid']==service_pid
+    assert not external() and gui.poll() is None
+    report['upgrade_with_open_gui']='refused before stopping service; ON retained'
+    gui.terminate();gui.wait(10);gui=None
     # Execute the actual installer again with ON, retaining blocking and intent.
     pipe.close();pipe=None
     run(installer,'/S',timeout=90)
     pipe=Pipe();pipe.settled(True);assert not external()
     report['installer_upgrade_preserves_on']='passed'
+    pipe.close();pipe=None
+    run(runtime,'--recover-killswitch',timeout=45)
+    run(runtime,'--service-ready')
+    pipe=Pipe();pipe.settled(False);assert external()
+    report['administrator_recovery']='passed; service restarted with OFF saved'
+    pipe.request('firewall',{'enabled':True,'gateway':''});pipe.settled(True)
+    assert not external()
     pipe.request('firewall',{'enabled':False});pipe.settled(False)
     assert external();report['explicit_off_restores_network']='passed'
     pipe.request('firewall',{'enabled':True,'gateway':''});pipe.settled(True)
@@ -233,6 +254,17 @@ try:
     # UCRT Python may stringify paths with '/'; NSIS validates drive roots as
     # C:\\, so the _?= argument must use native backslashes.
     command='"'+str(uninstall).replace('/','\\')+'" /S _?='+str(runtime.parent).replace('/','\\')
+    # Removal with a running GUI must leave the service and ON policy intact.
+    gui=subprocess.Popen([str(runtime)],env=clean)
+    time.sleep(3);assert gui.poll() is None
+    guarded=subprocess.run(command,capture_output=True,text=True,errors='replace',timeout=45)
+    assert guarded.returncode!=0,'Removal accepted a running interface'
+    run(runtime,'--service-ready')
+    pipe=Pipe();pipe.settled(True)
+    assert not external() and gui.poll() is None
+    pipe.close();pipe=None
+    report['uninstall_with_open_gui']='refused before stopping service; ON retained'
+    gui.terminate();gui.wait(10);gui=None
     removed=subprocess.run(command,capture_output=True,text=True,errors='replace',timeout=60)
     assert removed.returncode==0,'Uninstaller failed ('+str(removed.returncode)+'): '+removed.stderr[-2000:]
     assert not data.exists(),'Uninstall left service data'
@@ -244,6 +276,7 @@ try:
         "if (!(Get-NetFirewallRule -Name '"+foreign+"' -ErrorAction Stop)) { exit 1 }")
     report['unrelated_firewall_rule']='retained'
     report['uninstall_and_recovery']='passed'
+    report['complete']=True
     marker.write_text('complete')
 except BaseException:
     # This runs only in a disposable CI account. Print bounded service/ACL
@@ -259,6 +292,8 @@ except BaseException:
     if (data/'tmp/vpnc.log').exists():print((data/'tmp/vpnc.log').read_text(errors='replace')[-6000:])
     raise
 finally:
+    if gui and gui.poll() is None:
+        gui.terminate();gui.wait(10)
     if fixture:fixture.close()
     if existing:existing.close()
     if pipe:pipe.close()

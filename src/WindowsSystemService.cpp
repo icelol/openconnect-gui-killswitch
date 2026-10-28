@@ -20,6 +20,7 @@
 #include <ntsecapi.h>
 #include <sddl.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 // clang-format on
 #include <vector>
 
@@ -383,6 +384,80 @@ int WindowsSystemService::stop()
     CloseServiceHandle(manager);
     // Persistent filters and the user's saved ON/OFF intent are retained.
     return ok ? 0 : 1;
+}
+
+int WindowsSystemService::checkInterfaceClosed()
+{
+    if (!IsUserAnAdmin())
+        return 1;
+    // This is a read-only installer preflight. Never stop a process or change
+    // networking when the interface might still hold the installed DLLs open.
+    const auto normalized = [](const QString& path) {
+        auto result = QDir::fromNativeSeparators(path);
+        if (result.startsWith("//?/"))
+            result.remove(0, 4);
+        const auto native = QDir::toNativeSeparators(result).toStdWString();
+        std::vector<wchar_t> expanded(32768);
+        const auto length = GetLongPathNameW(native.c_str(), expanded.data(), DWORD(expanded.size()));
+        if (length && length < expanded.size())
+            result = QDir::fromNativeSeparators(QString::fromWCharArray(expanded.data(), int(length)));
+        return QDir::cleanPath(result);
+    };
+    const auto executable = normalized(QCoreApplication::applicationFilePath());
+    const auto filename = QFileInfo(executable).fileName();
+    DWORD servicePid = 0;
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!manager)
+        return 1;
+    SC_HANDLE service = OpenServiceW(manager, name, SERVICE_QUERY_STATUS);
+    bool serviceKnown = false;
+    if (service) {
+        SERVICE_STATUS_PROCESS state{};
+        DWORD bytes = 0;
+        serviceKnown = QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+            reinterpret_cast<BYTE*>(&state), sizeof(state), &bytes);
+        if (serviceKnown)
+            servicePid = state.dwProcessId;
+        CloseServiceHandle(service);
+    } else
+        serviceKnown = GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST;
+    CloseServiceHandle(manager);
+    if (!serviceKnown)
+        return 1;
+
+    Handle snapshot{ CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if (snapshot.value == INVALID_HANDLE_VALUE)
+        return 1;
+    PROCESSENTRY32W process{};
+    process.dwSize = sizeof(process);
+    if (!Process32FirstW(snapshot.value, &process))
+        return 1;
+    do {
+        if (process.th32ProcessID == GetCurrentProcessId() || process.th32ProcessID == servicePid
+            || filename.compare(QString::fromWCharArray(process.szExeFile), Qt::CaseInsensitive))
+            continue;
+        Handle handle{ OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID) };
+        if (!handle.value) {
+            if (GetLastError() == ERROR_INVALID_PARAMETER)
+                continue; // The matching process exited during enumeration.
+            std::fprintf(stderr, "Cannot verify the OpenConnect interface is closed. Close it and retry.\n");
+            return 1;
+        }
+        std::vector<wchar_t> path(32768);
+        DWORD length = DWORD(path.size());
+        if (!QueryFullProcessImageNameW(handle.value, 0, path.data(), &length)) {
+            DWORD exitCode = STILL_ACTIVE;
+            if (GetExitCodeProcess(handle.value, &exitCode) && exitCode != STILL_ACTIVE)
+                continue;
+            std::fprintf(stderr, "Cannot verify the OpenConnect interface is closed. Close it and retry.\n");
+            return 1;
+        }
+        if (executable.compare(normalized(QString::fromWCharArray(path.data(), int(length))), Qt::CaseInsensitive) == 0) {
+            std::fprintf(stderr, "Close the OpenConnect interface and retry. The service and protection were not changed.\n");
+            return 1;
+        }
+    } while (Process32NextW(snapshot.value, &process));
+    return GetLastError() == ERROR_NO_MORE_FILES ? 0 : 1;
 }
 
 int WindowsSystemService::install()

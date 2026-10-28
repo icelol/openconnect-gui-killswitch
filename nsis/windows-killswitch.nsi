@@ -32,6 +32,13 @@ Section "OpenConnect and system protection" Main
   SectionIn RO
   ; Stop the prior runtime while preserving persistent protection and ON intent.
   IfFileExists "$INSTDIR\openconnect-gui.exe" 0 fresh
+  nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --check-interface-closed'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP "Close the OpenConnect interface and retry. The service and protection were not changed." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --stop-service'
   Pop $0
   ${If} $0 != 0
@@ -112,6 +119,13 @@ Section "Uninstall"
   SetRegView 64
   SetShellVarContext all
   StrCpy $INSTDIR "$PROGRAMFILES64\OpenConnect-GUI-KillSwitch"
+  nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --check-interface-closed'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP "Close the OpenConnect interface and retry. The service and protection were not changed." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   nsExec::ExecToLog '"$INSTDIR\openconnect-gui.exe" --uninstall-service'
   Pop $0
   ${If} $0 != 0
@@ -119,9 +133,22 @@ Section "Uninstall"
     SetErrorLevel 1
     Abort
   ${EndIf}
+  ; Report cleanup failures instead of silently declaring successful removal.
+  ClearErrors
+  RMDir /r "$APPDATA\OpenConnect-GUI-KillSwitch"
+  ${If} ${Errors}
+    MessageBox MB_ICONSTOP "The service and its network rules were removed, but OpenConnect data files are still in use. Close OpenConnect and retry removal." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+  ClearErrors
+  RMDir /r "$INSTDIR"
+  ${If} ${Errors}
+    MessageBox MB_ICONSTOP "The service and its network rules were removed, but some OpenConnect program files could not be deleted. Restart Windows, reinstall OpenConnect, then retry removal." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OpenConnectKillSwitch"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnectKillSwitch"
   RMDir /r "$SMPROGRAMS\OpenConnect Kill Switch"
-  RMDir /r "$APPDATA\OpenConnect-GUI-KillSwitch"
-  RMDir /r "$INSTDIR"
 SectionEnd

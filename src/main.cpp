@@ -99,10 +99,11 @@ int main(int argc, char* argv[])
     for (int i = 1; i < argc; ++i) {
         const auto command = QString::fromLocal8Bit(argv[i]);
         if (command == "--install-service" || command == "--uninstall-service" || command == "--recover-killswitch"
-            || command == "--stop-service") {
+            || command == "--stop-service" || command == "--check-interface-closed") {
             QCoreApplication app(argc, argv);
             return command == "--install-service" ? WindowsSystemService::install()
                 : command == "--uninstall-service" ? WindowsSystemService::uninstall()
+                : command == "--check-interface-closed" ? WindowsSystemService::checkInterfaceClosed()
                 : command == "--stop-service" ? WindowsSystemService::stop() : WindowsSystemService::recover();
         }
     }
