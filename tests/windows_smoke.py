@@ -187,17 +187,24 @@ try:
     assert fixture.authenticated.is_set() and fixture.cstp.is_set()
     assert state['firewall']['tunnel'], 'Connected VPN lacks verified adapter permission'
     # Netsh can return before Windows finishes Duplicate Address Detection.
-    # Retry a bounded period on the same verified tunnel; never relax filtering.
-    with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
-        probe.settimeout(1);deadline=time.monotonic()+8
-        while True:
-            try:
+    # An implicit UDP bind made during that transition can retain the physical
+    # source/route even after the VPN address becomes preferred. Use a fresh
+    # unbound socket per attempt so normal route/source selection is still
+    # tested; never force the VPN address or relax filtering.
+    deadline=time.monotonic()+10;last_local=None
+    while True:
+        try:
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as probe:
+                probe.settimeout(1)
                 probe.sendto(b'OpenConnect Wintun data-path QA',('192.0.2.1',12345))
+                last_local=probe.getsockname()
                 payload,peer=probe.recvfrom(512);break
-            except OSError:
-                if time.monotonic()>=deadline:raise
-                time.sleep(.2)
-        assert payload==b'OpenConnect Wintun data-path QA' and peer==('192.0.2.1',12345)
+        except OSError as error:
+            if time.monotonic()>=deadline:
+                details=fixture.diagnostics();details['last_local_socket']=last_local
+                raise AssertionError('Wintun UDP path: '+json.dumps(details)) from error
+            time.sleep(.2)
+    assert payload==b'OpenConnect Wintun data-path QA' and peer==('192.0.2.1',12345)
     assert fixture.data.wait(1) and not external(), 'Tunnel or outside routing policy failed'
     report['username_password_cstp_wintun_udp']='passed with local TLS fixture'
     pipe.request('disconnect')
@@ -279,6 +286,7 @@ try:
     report['complete']=True
     marker.write_text('complete')
 except BaseException:
+    if fixture:print('Fixture diagnosis:',json.dumps(fixture.diagnostics()))
     # This runs only in a disposable CI account. Print bounded service/ACL
     # diagnostics without credentials, HTTP bodies or the fixture private key.
     for args in [('sc.exe','query','OpenConnectKillSwitch'),('icacls.exe',str(runtime.parent)),

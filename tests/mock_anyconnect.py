@@ -57,7 +57,10 @@ class MockAnyConnect:
             def get_request(self):
                 sock,peer=super().get_request()
                 return context.wrap_socket(sock,server_side=True),peer
-            def handle_error(self,request,address):pass # No bodies, keys or credentials in CI logs.
+            def handle_error(self,request,address):
+                # Record only the exception class; no bodies or credentials.
+                import sys
+                fixture.errors.append(sys.exc_info()[0].__name__)
         class Handler(socketserver.BaseRequestHandler):
             def handle(self):
                 self.request.settimeout(35);stream=self.request.makefile('rb')
@@ -86,9 +89,11 @@ class MockAnyConnect:
                             if len(payload)!=length:return
                             if kind==3:self.request.sendall(b'STF\x01\x00\x00\x04\x00')
                             elif kind==0:
+                                fixture.received_packets+=1
                                 reply=udp_reply(payload)
                                 if reply:
                                     self.request.sendall(b'STF\x01'+struct.pack('!HBB',len(reply),0,0)+reply)
+                                    fixture.sent_replies+=1
                                     fixture.data.set()
                             elif kind in (5,9):return
                     elif method=='POST':
@@ -104,9 +109,14 @@ class MockAnyConnect:
                 self.request.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nConnection: keep-alive\r\n'+extra+
                     b'Content-Length: '+str(len(body)).encode()+b'\r\n\r\n'+body)
         self.authenticated=threading.Event();self.cstp=threading.Event();self.data=threading.Event()
+        self.received_packets=0;self.sent_replies=0;self.errors=[]
         self.server=Server((self.host,0),Handler)
         self.url='https://'+self.host+':'+str(self.server.server_address[1])
         threading.Thread(target=self.server.serve_forever,daemon=True).start()
+    def diagnostics(self):
+        return {'authenticated':self.authenticated.is_set(),'cstp':self.cstp.is_set(),
+                'received_packets':self.received_packets,'sent_replies':self.sent_replies,
+                'errors':self.errors[-8:]}
     def close(self):
         self.server.shutdown();self.server.server_close();self.ca.write_bytes(self.original)
         shutil.rmtree(self.directory)
