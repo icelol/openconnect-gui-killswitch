@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-    <title>OpenConnect v1.2.0 — установка и удаление</title>
+    <title>OpenConnect v1.2.1 — установка и удаление</title>
     <welcome file="welcome.html" mime-type="text/html"/>
     <options customize="always" require-scripts="true"/>
     <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
@@ -20,6 +20,6 @@
             description="Снять собственную блокировку, удалить службы, приложение, настройки, кэши и журналы; тестовые копии перенести в Корзину. Cisco AnyConnect и другие VPN-клиенты сохраняются.">
         <pkg-ref id="net.openconnect-vpn.gui.killswitch.remove"/>
     </choice>
-    <pkg-ref id="net.openconnect-vpn.gui.killswitch" version="1.2.0" onConclusion="none">Install.pkg</pkg-ref>
-    <pkg-ref id="net.openconnect-vpn.gui.killswitch.remove" version="1.2.0" onConclusion="none">Remove.pkg</pkg-ref>
+    <pkg-ref id="net.openconnect-vpn.gui.killswitch" version="1.2.1" onConclusion="none">Install.pkg</pkg-ref>
+    <pkg-ref id="net.openconnect-vpn.gui.killswitch.remove" version="1.2.1" onConclusion="none">Remove.pkg</pkg-ref>
 </installer-gui-script>

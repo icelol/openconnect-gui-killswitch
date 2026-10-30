@@ -23,7 +23,8 @@ sh "$project_dir/scripts/build-openconnect.sh"
 PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export PKG_CONFIG_PATH
 
-cmake -S "$project_dir" -B "$build_dir" -G Ninja \
+cmake -U 'OPENCONNECT_*' -U 'pkgcfg_lib_OPENCONNECT_*' \
+    -S "$project_dir" -B "$build_dir" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET="$target_version"
 if ! grep -q '^#define OCGUI_HAVE_TLS12_API' "$build_dir/src/config.h"; then
     printf '%s\n' 'Release requires the pinned OpenConnect compatibility API.' >&2; exit 1
@@ -42,10 +43,12 @@ cp -X "$(brew --prefix ca-certificates)/share/ca-certificates/cacert.pem" "$app/
 mkdir -p "$app/Contents/Resources/licenses"
 cp -X "$project_dir/docs/third-party/pfctl-rs-MIT.txt" "$app/Contents/Resources/licenses/"
 cp -X "$project_dir/docs/third-party/openconnect-LGPL-2.1.txt" "$app/Contents/Resources/licenses/"
+cp -X "$project_dir/docs/third-party/qt-solutions-BSD-3-Clause.txt" "$app/Contents/Resources/licenses/"
 cp -X "$project_dir/patches/openconnect-9.21-tls12-policy.patch" "$app/Contents/Resources/licenses/"
 cp -X "$project_dir/patches/openconnect-9.21-ucrt.patch" "$app/Contents/Resources/licenses/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $release_version" "$app/Contents/Info.plist"
 macdeployqt "$app" -verbose=1 -libpath="$(brew --prefix qtsvg)/lib"
+python3 "$project_dir/scripts/package-macos-dependencies.py" "$app"
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict "$app"
 python3 "$project_dir/scripts/verify-macos-bundle.py" "$app"

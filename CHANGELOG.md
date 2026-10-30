@@ -1,5 +1,14 @@
 History of user-visible changes.
 
+## [v1.2.1](docs/releases/v1.2.1.md)
+
+- Unified Windows x64 and macOS Apple Silicon release, versioned downloads and EN/RU guides.
+- Verified installers, recovery/removal tools, dependency notices and corresponding source inputs.
+- Offline release manifest and SHA-256 verification; publishing requires no token files in the project.
+- User-confirmed Windows v1.2.0 behavior retained.
+
+## Upstream history
+
 ## [v1.6.3](https://gitlab.com/openconnect/openconnect-gui/-/tree/main) (unreleased)
 - Limit the auto-generated and user-supplied interface name to the maximum length allowed by libopenconnect (#365, #378)
 - Store username and password for GlobalProtect profiles (#390)

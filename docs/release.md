@@ -1,43 +1,32 @@
-# Building release version and create a package 
+# Release packaging / Выпуск релиза
 
-## Version scheme
+`VERSION` is authoritative for both platforms. Installer metadata, README links
+and release notes must agree. Keep published tags and binaries immutable.
 
-and main programming activities are in 'main' or 'feature/*' branches.
-Version string auto=generated on compilation from Git info into following format:
+1. Commit source and run `python3 scripts/validate-release.py`.
+2. On Apple Silicon run `sh scripts/build-macos.sh`: safety/UI tests, PKG, DMG,
+   bundle validation and corresponding modified OpenConnect source.
+3. Build Windows through `.github/workflows/windows.yml` or MSYS2 UCRT64 with
+   `sh scripts/build-windows.sh`. Run networking QA only on the disposable Windows
+   CI runner and preserve its commit/run URL and `windows-verification.json`.
+4. Audit actual installers, versions, signatures/dependencies, public CA,
+   cleanup/recovery, license notices, corresponding source inputs and privacy.
+   A mock gateway or package build does not prove target VPN compatibility.
+5. Put both installers, exact dependency sources, GUI source ZIP and verification
+   reports in `dist/`. Run `./release.sh`, then
+   `python3 scripts/assemble-release.py --check`.
+6. Publish the reviewed commit/tag, manifest files, `RELEASE-MANIFEST.json`,
+   `SHA256SUMS` and checksum sidecars. Download every published file and verify
+   SHA-256 and the remote source/tag. Protected GitLab main uses a reviewed MR.
 
-    <major>.<minor>.<patch>[-rev_count-sha1][-dirty]
+`release.sh` is an offline assembler: it reads no tokens, creates no tags, pushes
+no repositories and never contacts upstream maintainers' publication servers.
+Publishing uses the explicitly selected account/repository. Credentials and
+organization-specific profiles never belong in source, installers or reports.
 
-## Building packages
-
-Always check if you have committed all changes or move work-in-progress work into stash!!
-Following steps illustrate how to create application:
-
-    $ git clone https://gitlab.com/openconnect/openconnect-gui
-    $ cd openconnect-gui
-
-To build a release package, review released changes in `CHANGELOG.md`,
-update planned release version in `CMakeLists.txt`, commit and start a release
-process with target tag:
-
-    $ git checkout main
-    $ ./release.sh X.Y.Z
-
-Note that this requires to have a gitlab token with permissions to release
-at ~/.gitlab-token as well as the necessary credentials for
-casper.infradead.org.
-
-
-### Release process
-
-The version number in CMakeLists.txt should be updated to the
-next release number at the time of release (this allows users
-using development builds to receive notifications).
-
-After bumping the version and committing, the `release.sh` script
-should be run and this takes care of:
- - Creating a tag
- - Building released packages on gitlab CI
- - Uploading the packages to casper.infradead.org
- - Creating a gitlab release
- - Copying the relevant changelong entries to release description
-
+Обе платформы используют одну версию из `VERSION` и проверенный коммит. После
+сборки проверяются реальные EXE, PKG/DMG, восстановление/удаление, лицензии,
+соответствующие исходники и отсутствие частных данных. `release.sh` создаёт
+локальные `RELEASE-MANIFEST.json` и `SHA256SUMS`; публикаций и чтения токенов в нём
+нет. После публикации заново скачайте файлы и проверьте хеши, тег и исходники.
+Уже опубликованные файлы старых релизов сохраняются.

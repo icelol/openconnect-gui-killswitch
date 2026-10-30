@@ -1,14 +1,21 @@
 # OpenConnect GUI + Kill Switch
 
-**1.2.0 adds a native Windows x64 client:** LocalSystem service, WFP kill switch,
-Wintun and a self-contained installer. macOS keeps its PF backend and the same
-independent switch. [Windows guide](docs/windows.md) · [Руководство Windows](docs/windows.ru.md).
+**Stable release 1.2.1 — Windows x64 and macOS Apple Silicon.**
+A system-wide kill switch with independent Connect/Disconnect controls.
+
+| Platform | Download | Guide |
+| --- | --- | --- |
+| Windows x64 | [Setup EXE](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-Setup-windows-x64-v1.2.1.exe) | [EN](docs/windows.md) · [RU](docs/windows.ru.md) |
+| macOS Apple Silicon, 27+ | [DMG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-arm64-v1.2.1.dmg) · [PKG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-Setup-arm64-v1.2.1.pkg) | [EN/RU](docs/macos-killswitch.md) |
+
+[All release files, source and SHA-256](https://github.com/icelol/openconnect-gui-killswitch/releases/tag/v1.2.1).
+Before updating or removing on Windows, choose **Quit** in the tray menu; the window close button may only minimize it.
 
 **Service health is visible in the GUI.** Authenticated status is checked every
 two seconds; the indicator shows the runtime version and response latency.
 Service availability, firewall state, and the VPN connection phase are separate.
-The **Service diagnostics** button (shown as **«Диагностика службы»**) reads PF
-rules locally without a Terminal or another administrator prompt. Errors leave
+The **Service diagnostics** button (shown as **«Диагностика службы»**) reads network
+policy locally without a Terminal or another administrator prompt. Errors leave
 network controls accessible. Server contact, authentication replies, and tunnel
 setup use separate 30/90/60-second deadlines; each input prompt allows 120 seconds.
 
