@@ -124,6 +124,36 @@ bool savePrivateJson(const QString& path, const QJsonObject& object, QString& er
 #endif
 }
 
+bool preserveCorruptJson(const QString& path, QString& error)
+{
+    if (!QFileInfo::exists(path))
+        return true;
+    if (!stateDirectory(path, error))
+        return false;
+#ifdef Q_OS_MACOS
+    struct stat info{};
+    const auto bytes = QFile::encodeName(path);
+    if (::lstat(bytes.constData(), &info) != 0 || !S_ISREG(info.st_mode)
+        || info.st_uid != ::geteuid() || (info.st_mode & 0022)) {
+        error = QStringLiteral("Cannot preserve unsafe recovery metadata");
+        return false;
+    }
+    // Reserve a collision-free sibling in the protected directory. Keep the
+    // damaged file for diagnosis, but never reuse its partial policy or token.
+    QTemporaryFile backup(path + ".corrupt.XXXXXX");
+    if (!backup.open() || ::chmod(bytes.constData(), 0600) != 0
+        || ::rename(bytes.constData(), QFile::encodeName(backup.fileName()).constData()) != 0) {
+        error = QStringLiteral("Cannot preserve damaged recovery metadata");
+        return false;
+    }
+    backup.setAutoRemove(false);
+    return true;
+#else
+    error = QStringLiteral("The kill switch requires macOS");
+    return false;
+#endif
+}
+
 bool configuredTunnel(const QString& name, const QString& ipv4, const QString& ipv6, QString& error)
 {
     const auto interface = QNetworkInterface::interfaceFromName(name);
@@ -453,27 +483,32 @@ bool NetworkGuard::load(QString& error)
         error = QStringLiteral("Invalid kill switch recovery state");
         return false;
     }
-    m_armed = object.value("armed").toBool();
-    m_statesCleared = object.value("statesCleared").toBool();
-    m_token = object.value("token").toString();
-    if (!m_token.isEmpty() && !QRegularExpression("^[0-9]+$").match(m_token).hasMatch()) {
+    const bool armed = object.value("armed").toBool();
+    const auto token = object.value("token").toString();
+    if (!token.isEmpty() && !QRegularExpression("^[0-9]+$").match(token).hasMatch()) {
         error = QStringLiteral("Invalid PF recovery token");
         return false;
     }
-    m_policy = {};
-    m_policy.host = object.value("host").toString();
-    m_policy.port = quint16(object.value("port").toInt());
+    Policy policy;
+    policy.host = object.value("host").toString();
+    policy.port = quint16(object.value("port").toInt());
     for (const auto& value : object.value("addresses").toArray())
-        m_policy.addresses << value.toString();
+        policy.addresses << value.toString();
     for (const auto& value : object.value("udpPorts").toArray())
-        m_policy.udpPorts << quint16(value.toInt());
-    m_policy.interfaceName = object.value("interface").toString();
-    m_hasTunnel = !m_policy.interfaceName.isEmpty();
-    m_policy.ipv4 = object.value("ipv4").toString();
-    m_policy.ipv6 = object.value("ipv6").toString();
-    m_expectedRules = object.value("rules").toString();
-    if (m_armed && rules(m_policy, error).isEmpty())
+        policy.udpPorts << quint16(value.toInt());
+    policy.interfaceName = object.value("interface").toString();
+    policy.ipv4 = object.value("ipv4").toString();
+    policy.ipv6 = object.value("ipv6").toString();
+    if (armed && rules(policy, error).isEmpty())
         return false;
+    // Commit only a completely validated journal. Failed restoration must not
+    // leave a partial armed flag or unvalidated token in the live instance.
+    m_policy = policy;
+    m_armed = armed;
+    m_statesCleared = object.value("statesCleared").toBool();
+    m_token = token;
+    m_hasTunnel = !policy.interfaceName.isEmpty();
+    m_expectedRules = object.value("rules").toString();
     return true;
 }
 
@@ -791,8 +826,16 @@ bool NetworkGuard::disable(QString& error)
 
 bool NetworkGuard::disableUnlocked(QString& error)
 {
-    if (!m_armed && QFile::exists(m_statePath) && !load(error))
-        return false;
+    bool corruptJournal = false;
+    if (!m_armed && QFile::exists(m_statePath) && !load(error)) {
+        // OFF must remain available even after an interrupted/corrupt write.
+        // A failed load may have assigned only some fields. None of that
+        // partial data can authorize releasing a PF enable reference.
+        corruptJournal = true;
+        m_token.clear();
+        m_policy = {};
+        error.clear();
+    }
     const auto result = run({"-a", anchor(), "-f", "-"});
     const auto actual = run({"-a", anchor(), "-sr"});
     if (result.exitCode || actual.exitCode || !filterRules(actual.output).isEmpty()) {
@@ -800,14 +843,21 @@ bool NetworkGuard::disableUnlocked(QString& error)
         return false;
     }
     if (!m_bootPath.isEmpty()) {
-        auto bootPolicy = m_policy;
+        Policy bootPolicy;
         bool enabled = false;
-        if (bootPolicy.addresses.isEmpty()
-            && !readBootPolicy(m_bootPath, bootPolicy, enabled, error))
-            return false;
+        if (!readBootPolicy(m_bootPath, bootPolicy, enabled, error)) {
+            if (!preserveCorruptJson(m_bootPath, error))
+                return false;
+            // No endpoint information is required to persist an explicit OFF.
+            bootPolicy = {};
+            bootPolicy.host = "unconfigured.invalid";
+            error.clear();
+        }
         if (!writeBootPolicy(m_bootPath, bootPolicy, false, error))
             return false;
     }
+    if (corruptJournal && !preserveCorruptJson(m_statePath, error))
+        return false;
     m_armed = false;
     m_hasTunnel = false;
     m_statesCleared = false;

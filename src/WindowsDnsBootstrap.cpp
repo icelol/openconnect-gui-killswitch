@@ -88,11 +88,19 @@ QByteArray query(const QString& host, quint16 type, quint16 id)
     append(data, 1);
     return data;
 }
-QByteArray tcp(const QHostAddress& server, const QByteArray& request)
+int remaining(const QElapsedTimer& timer, int timeoutMs, int maximum)
+{
+    return int(qMax<qint64>(0, qMin<qint64>(maximum, qint64(timeoutMs) - timer.elapsed())));
+}
+QByteArray tcp(const QHostAddress& server, quint16 port, const QByteArray& request, const QElapsedTimer& deadline, int timeoutMs)
 {
     QTcpSocket socket;
-    socket.connectToHost(server, 53);
-    if (!socket.waitForConnected(300))
+    socket.setReadBufferSize(8194);
+    const auto connectWait = remaining(deadline, timeoutMs, 300);
+    if (!connectWait)
+        return {};
+    socket.connectToHost(server, port);
+    if (!socket.waitForConnected(connectWait))
         return {};
     QByteArray frame;
     append(frame, quint16(request.size()));
@@ -103,7 +111,7 @@ QByteArray tcp(const QHostAddress& server, const QByteArray& request)
     timer.start();
     QByteArray result;
     int expected = -1;
-    while (timer.elapsed() < 800) {
+    while (timer.elapsed() < 800 && remaining(deadline, timeoutMs, 800)) {
         if (socket.bytesAvailable())
             result += socket.readAll();
         if (result.size() >= 2 && expected < 0) {
@@ -113,7 +121,9 @@ QByteArray tcp(const QHostAddress& server, const QByteArray& request)
         }
         if (expected >= 0 && result.size() >= expected + 2)
             return result.mid(2, expected);
-        socket.waitForReadyRead(40);
+        const auto wait = qMin(remaining(deadline, timeoutMs, 40), remaining(timer, 800, 40));
+        if (wait)
+            socket.waitForReadyRead(wait);
     }
     return {};
 }
@@ -230,6 +240,14 @@ QStringList WindowsDnsBootstrap::response(const QByteArray& wire, quint16 id, co
 
 QStringList WindowsDnsBootstrap::lookup(const QString& host, const QStringList& servers, QString& error)
 {
+    return lookupWithDeadline(host, servers, error, 53, 2500);
+}
+
+QStringList WindowsDnsBootstrap::lookupWithDeadline(const QString& host, const QStringList& servers, QString& error, quint16 port, int timeoutMs)
+{
+    error.clear();
+    QElapsedTimer timer;
+    timer.start();
     struct Pending {
         QHostAddress server;
         quint16 id, type;
@@ -250,30 +268,32 @@ QStringList WindowsDnsBootstrap::lookup(const QString& host, const QStringList& 
                 continue;
             if (!item.socket->bind(item.server.protocol() == QAbstractSocket::IPv4Protocol ? QHostAddress::AnyIPv4 : QHostAddress::AnyIPv6, 0))
                 continue;
-            if (item.socket->writeDatagram(item.request, item.server, 53) < 0)
+            if (!port || !remaining(timer, timeoutMs, timeoutMs)
+                || item.socket->writeDatagram(item.request, item.server, port) < 0)
                 continue;
             pending.push_back(std::move(item));
         }
-    QElapsedTimer timer;
-    timer.start();
     QStringList addresses;
-    while (timer.elapsed() < 2500) {
+    while (remaining(timer, timeoutMs, timeoutMs)) {
         bool unfinished = false;
         for (auto& item : pending) {
-            if (item.done)
+            if (item.done || !remaining(timer, timeoutMs, timeoutMs))
                 continue;
             unfinished = true;
             if (!item.socket->hasPendingDatagrams())
-                item.socket->waitForReadyRead(15);
-            while (item.socket->hasPendingDatagrams()) {
+                item.socket->waitForReadyRead(remaining(timer, timeoutMs, 15));
+            while (!item.done && remaining(timer, timeoutMs, timeoutMs) && item.socket->hasPendingDatagrams()) {
                 const auto datagram = item.socket->receiveDatagram(8192);
-                if (datagram.senderAddress() != item.server || datagram.senderPort() != 53)
+                if (datagram.senderAddress() != item.server || datagram.senderPort() != port)
                     continue;
                 bool truncated = false;
                 auto found = response(datagram.data(), item.id, host, item.type, truncated);
                 if (truncated) {
                     bool ignored = false;
-                    found = response(tcp(item.server, item.request), item.id, host, item.type, ignored);
+                    found = response(tcp(item.server, port, item.request, timer, timeoutMs), item.id, host, item.type, ignored);
+                    // One validated fallback per query. Replayed TC packets
+                    // must not multiply blocking TCP waits under DNS permits.
+                    item.done = true;
                 }
                 if (!found.isEmpty()) {
                     addresses << found;

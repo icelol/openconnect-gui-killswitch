@@ -140,6 +140,9 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     , ss(new StoredServer())
 {
     ui->setupUi(this);
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    m_serviceProfile = true;
+#endif
 
 #ifdef _WIN32
     ui->interfaceNameEdit->setMaxLength(OC_IFNAME_MAX_LENGTH);
@@ -176,10 +179,10 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     ui->dtlsAttemptPeriodSpinBox->setValue(ss->get_dtls_reconnect_timeout());
 
     // Load the windows certificates
-    load_win_certs();
+    if (!m_serviceProfile) load_win_certs();
 
     int type = ss->get_token_type();
-    if (type >= 0) {
+    if (!m_serviceProfile && type >= 0) {
         ui->tokenBox->setCurrentIndex(token_tab(ss->get_token_type()));
         ui->tokenEdit->setText(ss->get_token_str());
     }
@@ -196,6 +199,26 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     QString hash;
     ss->get_server_pin(hash);
     ui->serverCertHash->setText(hash);
+
+    if (m_serviceProfile) {
+        // These legacy features are not accepted by the privileged service.
+        // Do not invite users to enter secrets that would only be stored in
+        // old profile settings (plaintext on macOS), without being used.
+        const auto explanation = tr("Системная служба использует интерактивный вход и системные сертификаты доверия. Эта устаревшая настройка не поддерживается. Сохранённые ранее значения не изменяются.");
+        for (auto label : {ui->caCertificateLabel, ui->serverCertificateLabel,
+                 ui->otpTokenLabel, ui->interfaceNameLabel, ui->vpncScriptLabel, ui->logLevelLabel})
+            ui->settingsProfileLayout->setRowVisible(label, false);
+        ui->settingsTabWidget->hide();
+        ui->settingsTabWidget->setEnabled(false);
+        for (QWidget* control : QList<QWidget*>{ui->batchModeBox, ui->useProxyBox,
+                 ui->tokenEdit, ui->tokenBox, ui->caCertEdit, ui->caCertButton,
+                 ui->userKeyEdit, ui->userKeyButton, ui->userCertEdit, ui->userCertButton,
+                 ui->interfaceNameEdit, ui->vpncScriptEdit, ui->vpncScriptButton, ui->loglevelBox}) {
+            control->setEnabled(false);
+            control->setToolTip(explanation);
+        }
+        ui->batchModeBox->hide(); ui->useProxyBox->hide();
+    }
 }
 
 EditDialog::~EditDialog()
@@ -225,7 +248,7 @@ void EditDialog::on_buttonBox_accepted()
         return;
     }
 
-    if (ui->caCertEdit->text().isEmpty() == false) {
+    if (!m_serviceProfile && ui->caCertEdit->text().isEmpty() == false) {
         if (ss->set_ca_cert(ui->caCertEdit->text()) != 0) {
             QMessageBox mbox;
             mbox.setText(tr("Cannot import CA certificate."));
@@ -238,7 +261,7 @@ void EditDialog::on_buttonBox_accepted()
         }
     }
 
-    if (ui->userKeyEdit->text().isEmpty() == false) {
+    if (!m_serviceProfile && ui->userKeyEdit->text().isEmpty() == false) {
         if (ss->set_client_key(ui->userKeyEdit->text()) != 0) {
             QMessageBox mbox;
             mbox.setText(tr("Cannot import user key."));
@@ -249,7 +272,7 @@ void EditDialog::on_buttonBox_accepted()
         }
     }
 
-    if (ui->userCertEdit->text().isEmpty() == false) {
+    if (!m_serviceProfile && ui->userCertEdit->text().isEmpty() == false) {
         if (ss->set_client_cert(ui->userCertEdit->text()) != 0) {
             QMessageBox mbox;
             mbox.setText(tr("Cannot import user certificate."));
@@ -262,7 +285,7 @@ void EditDialog::on_buttonBox_accepted()
         }
     }
 
-    if (ss->client_is_complete() != true) {
+    if (!m_serviceProfile && ss->client_is_complete() != true) {
         QMessageBox::information(this,
             qApp->applicationName(),
             tr("There is a client certificate specified but no key!"));
@@ -299,7 +322,7 @@ void EditDialog::on_buttonBox_accepted()
     }
     ss->set_log_level(loglevel_rtab[type]);
 
-    ss->save();
+    ss->save(m_serviceProfile);
     this->accept();
 }
 

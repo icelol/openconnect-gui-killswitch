@@ -75,4 +75,5 @@ private:
     Ui::EditDialog* ui;
     std::vector<win_cert_st> winCerts;
     StoredServer* ss;
+    bool m_serviceProfile = false;
 };

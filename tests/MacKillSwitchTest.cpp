@@ -2,6 +2,7 @@
 #include "NetworkGuard.h"
 #include "MacPfStates.h"
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QProcess>
@@ -235,6 +236,71 @@ private slots:
         QVERIFY(service.restoreBootProtection(error));
         QCOMPARE(pf.calls.count("-X 123456"), calls);
         QVERIFY(!pf.calls.contains("-d"));
+    }
+    void corruptRecoveryJournalCannotPreventExplicitOff()
+    {
+        for (const auto& damaged : {
+                 QByteArray("{\"schema\":1,"),
+                 QByteArray("{\"schema\":1,\"armed\":true,\"token\":\"invalid\"}"),
+                 QByteArray("{\"schema\":1,\"armed\":true,\"token\":\"123456\",\"host\":\"\"}")}) {
+            QTemporaryDir directory; FakePf pf; QString error;
+            const auto state = directory.filePath("state.json");
+            const auto boot = directory.filePath("boot.json");
+            {
+                NetworkGuard oldService(std::ref(pf), state, boot);
+                QVERIFY(oldService.armPinned(policy(), error));
+            }
+            QFile file(state); QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(file.write(damaged), damaged.size()); file.close();
+            NetworkGuard service(std::ref(pf), state, boot);
+            QVERIFY(!service.restoreBootProtection(error));
+            QVERIFY(!service.isArmed()); // Failed reads never commit partial fields.
+            QVERIFY2(service.disable(error), qPrintable(error));
+            QVERIFY(error.isEmpty());
+            QVERIFY(pf.installed.isEmpty()); QVERIFY(!service.isArmed());
+            QVERIFY(!QFile::exists(state));
+            QVERIFY(!pf.calls.contains("-X 123456")); // Cannot trust a damaged token.
+            QVERIFY(pf.enabled); // Unknown references and other clients remain intact.
+            const auto backups = QDir(directory.path()).entryList({"state.json.corrupt.*"}, QDir::Files);
+            QCOMPARE(backups.size(), 1);
+            QFile backup(directory.filePath(backups.first())); QVERIFY(backup.open(QIODevice::ReadOnly));
+            QCOMPARE(backup.readAll(), damaged);
+            QCOMPARE(backup.permissions() & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther), QFile::Permissions{});
+            NetworkGuard restarted(std::ref(pf), state, boot);
+            QVERIFY2(restarted.restoreBootProtection(error), qPrintable(error));
+            QVERIFY(!restarted.isArmed());
+        }
+    }
+    void corruptBootPolicyIsPreservedAndReplacedByExplicitOff()
+    {
+        for (const bool retainJournal : {false, true}) {
+            QTemporaryDir directory; FakePf pf; QString error;
+            const auto state = directory.filePath("state.json");
+            const auto boot = directory.filePath("boot.json");
+            {
+                NetworkGuard oldService(std::ref(pf), state, boot);
+                QVERIFY(oldService.armPinned(policy(), error));
+            }
+            if (!retainJournal) QVERIFY(QFile::remove(state));
+            const QByteArray damaged("{\"schema\":1,\"enabled\":true,");
+            QFile file(boot); QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(file.write(damaged), damaged.size()); file.close();
+            NetworkGuard service(std::ref(pf), state, boot);
+            QVERIFY(!service.restoreBootProtection(error));
+            QVERIFY2(service.disable(error), qPrintable(error));
+            QVERIFY(error.isEmpty()); QVERIFY(pf.installed.isEmpty());
+            QCOMPARE(pf.calls.contains("-X 123456"), retainJournal);
+            QCOMPARE(pf.enabled, !retainJournal); // Only an intact journal owns its token.
+            bool enabled = true; NetworkGuard::Policy restored;
+            QVERIFY(NetworkGuard::readBootPolicy(boot, restored, enabled, error));
+            QVERIFY(!enabled); QCOMPARE(restored.host, QString("unconfigured.invalid"));
+            const auto backups = QDir(directory.path()).entryList({"boot.json.corrupt.*"}, QDir::Files);
+            QCOMPARE(backups.size(), 1);
+            QFile backup(directory.filePath(backups.first())); QVERIFY(backup.open(QIODevice::ReadOnly));
+            QCOMPARE(backup.readAll(), damaged);
+            NetworkGuard restarted(std::ref(pf), state, boot);
+            QVERIFY(restarted.restoreBootProtection(error)); QVERIFY(!restarted.isArmed());
+        }
     }
     void exactStateDeletionRespectsOriginalDirectionAndPorts()
     {

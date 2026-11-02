@@ -162,3 +162,10 @@ PF и VPN в тестах подменяются; настоящий `pfctl -n` 
 GPL-2.0-or-later. Основа — OpenConnect-GUI 1.6.2. Уведомления исходных авторов и
 сторонние лицензии сохранены: [UPSTREAM.md](UPSTREAM.md), [AUTHORS](AUTHORS),
 [LICENSE.txt](LICENSE.txt).
+
+
+## Kill switch operation and security review / Работа и безопасность
+
+- [Operation, manual OFF and recovery (RU)](docs/killswitch-operation.ru.md).
+- [Network/security audit and improvement plan (RU)](docs/network-security-review.ru.md).
+- [Unreleased fixes / Ещё не выпущенные исправления](docs/unreleased.md).

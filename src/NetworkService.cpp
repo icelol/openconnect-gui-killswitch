@@ -20,6 +20,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSet>
+#include <QScopeGuard>
 #include <QtConcurrent/QtConcurrentRun>
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -35,12 +36,12 @@ namespace {
 constexpr qint64 maxMessage = 64 * 1024;
 volatile std::sig_atomic_t stopping = 0;
 void requestStop(int) { stopping = 1; }
-void writeCommand(qintptr fd, char command)
+bool writeCommand(qintptr fd, char command)
 {
 #ifdef Q_OS_WIN
-    (void)::send(SOCKET(fd), &command, 1, 0);
+    return ::send(SOCKET(fd), &command, 1, 0) == 1;
 #else
-    (void)::write(fd, &command, 1);
+    return ::write(fd, &command, 1) == 1;
 #endif
 }
 bool supportedKeys(const QJsonObject& params, const QSet<QString>& keys)
@@ -69,6 +70,12 @@ QString networkServiceSocket()
 ServiceVpnSession::ServiceVpnSession(NetworkGuard* guard, const QJsonObject& profile, QObject* parent)
     : QThread(parent), m_guard(guard), m_profile(profile)
 {
+    m_cancelRetry.setParent(this);
+    m_cancelRetry.setInterval(100);
+    connect(&m_cancelRetry, &QTimer::timeout, this, [this] {
+        QMutexLocker lock(&m_lock);
+        queueCancelLocked();
+    });
     m_connectDeadline.setParent(this);
     m_connectDeadline.setObjectName("vpnConnectDeadline");
     m_connectDeadline.setSingleShot(true);
@@ -101,14 +108,27 @@ void ServiceVpnSession::cancel()
     m_cancelled = true;
     QMetaObject::invokeMethod(&m_connectDeadline, "stop", Qt::AutoConnection);
     QMutexLocker lock(&m_lock);
-    if (m_fd >= 0) writeCommand(m_fd, OC_CMD_CANCEL);
+    queueCancelLocked();
     m_answerReady.wakeAll();
+}
+
+void ServiceVpnSession::queueCancelLocked()
+{
+    if (m_fd >= 0 && !m_cancelCommandSent)
+        m_cancelCommandSent = writeCommand(m_fd, OC_CMD_CANCEL);
+    // Retry asynchronously when a nonblocking command endpoint is full. No
+    // wait/retry loop may run on the control thread or while holding m_lock.
+    if (m_fd >= 0 && !m_cancelCommandSent)
+        QMetaObject::invokeMethod(&m_cancelRetry, "start", Qt::AutoConnection);
+    else
+        QMetaObject::invokeMethod(&m_cancelRetry, "stop", Qt::AutoConnection);
 }
 
 void ServiceVpnSession::requestStats()
 {
     QMutexLocker lock(&m_lock);
-    if (m_fd >= 0) writeCommand(m_fd, OC_CMD_STATS);
+    if (m_fd >= 0 && !m_cancelled && !m_statsPending)
+        m_statsPending = writeCommand(m_fd, OC_CMD_STATS);
 }
 
 bool ServiceVpnSession::awaitingInput() const
@@ -126,7 +146,7 @@ bool ServiceVpnSession::answer(const QString& challenge, bool accepted, const QS
     m_accepted = accepted;
     if (!accepted) {
         m_cancelled = true;
-        if (m_fd >= 0) writeCommand(m_fd, OC_CMD_CANCEL);
+        queueCancelLocked();
     }
     m_answered = true;
     m_answerReady.wakeAll();
@@ -167,6 +187,7 @@ void ServiceVpnSession::connected(const QString& dns, const QString& ip, const Q
 
 void ServiceVpnSession::stats(const oc_stats* value, const QString& dtls)
 {
+    { QMutexLocker lock(&m_lock); m_statsPending = false; }
     emit notification({{"event", "stats"}, {"tx", QString::number(value->tx_bytes)},
         {"rx", QString::number(value->rx_bytes)}, {"dtls", dtls}});
 }
@@ -218,13 +239,15 @@ void ServiceVpnSession::run()
         vpn.killSwitch = m_guard;
         vpn.setUrl(QUrl(m_profile.value("gateway").toString()));
         { QMutexLocker lock(&m_lock); m_fd = vpn.get_cmd_fd(); }
+        // Destroy this binding before VpnInfo closes the descriptor, including
+        // during exceptions. A recycled fd must never receive our commands.
+        const auto unbind = qScopeGuard([this] { QMutexLocker lock(&m_lock); m_fd = -1; });
         if (m_cancelled) cancel();
         if (!m_cancelled) {
             const int result = vpn.connect();
             if (result == 0 && !m_cancelled) vpn.mainloop();
             else if (!m_cancelled) error(vpn.last_err);
         }
-        { QMutexLocker lock(&m_lock); m_fd = -1; }
     } catch (const std::exception& exception) {
         delete profile;
         error(QString::fromUtf8(exception.what()));
@@ -397,7 +420,11 @@ void NetworkService::accept()
         });
         connect(socket, &QLocalSocket::disconnected, this, [this, socket] {
             m_clients.removeAll(socket);
-            if (m_owner == socket && m_session && m_session->awaitingInput()) m_session->cancel();
+            // An unfinished login also belongs to this client while the
+            // server is processing a submitted form or setting up the tunnel.
+            // Do not establish a new VPN after its GUI owner has disappeared.
+            // An already established service session survives closing the GUI.
+            if (m_owner == socket && m_session && m_vpnState != "connected") m_session->cancel();
             if (m_owner == socket && !m_pendingProfile.isEmpty()) {
                 m_pendingProfile = {}; m_vpnState = "disconnected"; broadcast();
             }
