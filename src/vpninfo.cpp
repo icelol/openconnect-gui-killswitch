@@ -455,16 +455,6 @@ static void setup_tun_vfn(void* privdata)
     vpn->logVpncScriptOutput();
 }
 
-static inline int set_sock_block(SOCKET fd)
-{
-#ifdef _WIN32
-    unsigned long mode = 0;
-    return ioctlsocket(fd, FIONBIO, &mode);
-#else
-    return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
-#endif
-}
-
 VpnInfo::VpnInfo(QString name, StoredServer* ss, MainWindow* m)
 {
     initialize(name, ss, m, nullptr);
@@ -503,7 +493,9 @@ void VpnInfo::initialize(QString name, StoredServer* ss, MainWindow* m, VpnCallb
         Logger::instance().addMessage(QObject::tr("invalid socket"));
         throw std::runtime_error("pipe setup fails");
     }
-    set_sock_block(this->cmd_fd);
+    // Keep the nonblocking write endpoint supplied by libOpenConnect. The
+    // service control thread must remain responsive if its worker stops
+    // draining commands; a full pipe must never block OFF or status.
 
     this->last_err = "";
     this->ss = ss;

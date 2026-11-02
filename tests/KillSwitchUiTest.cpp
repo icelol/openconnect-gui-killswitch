@@ -4,15 +4,18 @@
 #include "NetworkClient.h"
 #include "dialog/mainwindow.h"
 #include "dialog/MyInputDialog.h"
+#include "dialog/editdialog.h"
 #include "FileLogger.h"
 #include "server_storage.h"
 #include "VpnProgress.h"
+#include "vpninfo.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QPromise>
 #include <QPushButton>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QProcess>
 #include <QMessageBox>
@@ -441,6 +444,120 @@ private slots:
         QVERIFY(pf.installed.isEmpty());
     }
 
+    void ownerExitCancelsAnUnfinishedLoginButPreservesAnEstablishedVpn()
+    {
+        for (const bool connected : {false, true}) {
+            QTemporaryDir directory; Firewall pf; QString error;
+            NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
+            const auto socket = directory.filePath("control.sock");
+            NetworkService service(&guard, getuid(), socket);
+            QVERIFY(service.start(error)); service.m_monitor.stop();
+            auto owner = new NetworkClient(nullptr, socket, getuid());
+            owner->start(); QTRY_VERIFY(owner->available());
+            QTRY_COMPARE(service.m_clients.size(), 1);
+            service.m_owner = service.m_clients.first();
+            service.m_session = new ServiceVpnSession(&guard, {}, &service);
+            service.m_vpnState = connected ? "connected" : "connecting";
+            service.m_vpnDetails = {{"phase", connected ? "connected" : "authenticating"}};
+            // No prompt is pending: this is the gap after credentials have
+            // been submitted, before the remote server responds. No real VPN
+            // worker, credentials or network connection is needed.
+            QVERIFY(!service.m_session->awaitingInput());
+            delete owner;
+            QTRY_VERIFY(service.m_clients.isEmpty());
+            QSignalSpy events(service.m_session, &ServiceVpnSession::notification);
+            auto input = QtConcurrent::run([&] {
+                QString unused;
+                return service.m_session->input("Test", "Next form", {}, true, {}, {}, unused);
+            });
+            QTRY_VERIFY(input.isFinished() || service.m_session->awaitingInput());
+            const bool rejectedAfterExit = input.isFinished();
+            if (!rejectedAfterExit) {
+                QTRY_VERIFY(!events.isEmpty());
+                const auto challenge = events.first().first().toJsonObject().value("challenge").toString();
+                QVERIFY(service.m_session->answer(challenge, false, {}));
+            }
+            QTRY_VERIFY(input.isFinished());
+            QVERIFY(!input.result());
+            QCOMPARE(rejectedAfterExit, !connected);
+            QVERIFY(pf.installed.isEmpty());
+        }
+    }
+
+    void openConnectCommandProducerRetainsItsNonblockingContract()
+    {
+        VpnInfo vpn("Command endpoint regression", new StoredServer,
+            static_cast<VpnCallbacks*>(nullptr));
+        const auto flags = ::fcntl(vpn.get_cmd_fd(), F_GETFL);
+        QVERIFY(flags >= 0);
+        QVERIFY2(flags & O_NONBLOCK,
+            "A blocking command producer can freeze the system service and prevent OFF");
+    }
+
+    void fullCommandPipeKeepsControlResponsiveAndRetriesOneCancellation()
+    {
+        int descriptors[2];
+        QVERIFY(::pipe(descriptors) == 0);
+        const auto closePipe = qScopeGuard([&] { ::close(descriptors[0]); ::close(descriptors[1]); });
+        for (const auto fd : descriptors)
+            QVERIFY(::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK) == 0);
+        QTemporaryDir directory; Firewall pf; QString error;
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json"));
+        guard.requestEnabled(false);
+        ServiceVpnSession session(&guard, {});
+        session.m_fd = descriptors[1];
+        const auto unbind = qScopeGuard([&] { session.m_fd = -1; });
+        // Only one unacknowledged stats command is permitted, even if status
+        // requests outpace a worker which is no longer reading commands.
+        for (int i = 0; i < 10000; ++i) session.requestStats();
+        char command;
+        QCOMPARE(::read(descriptors[0], &command, 1), ssize_t(1));
+        QCOMPARE(command, char(OC_CMD_STATS));
+        QCOMPARE(::read(descriptors[0], &command, 1), ssize_t(-1));
+        const char filler = OC_CMD_STATS;
+        int filled = 0;
+        while (::write(descriptors[1], &filler, 1) == 1) ++filled;
+        QVERIFY(filled > 0);
+        QVERIFY(errno == EAGAIN || errno == EWOULDBLOCK);
+
+        NetworkService service(&guard, getuid(), directory.filePath("control.sock"));
+        QVERIFY(service.start(error)); service.m_monitor.stop();
+        service.m_session = &session; service.m_vpnState = "connecting";
+        const auto detach = qScopeGuard([&] { service.m_session = nullptr; });
+        NetworkClient client(nullptr, directory.filePath("control.sock"), getuid());
+        client.start(); QTRY_VERIFY(client.available());
+        QElapsedTimer elapsed; elapsed.start();
+        for (int i = 0; i < 10000; ++i) { session.cancel(); session.requestStats(); }
+        QVERIFY2(elapsed.elapsed() < 2000, "Full command pipe blocked the service control thread");
+        bool replied = false;
+        client.request("disconnect", {}, [&](const QJsonObject&, const QString& failure) {
+            QVERIFY(failure.isEmpty()); replied = true;
+        });
+        QTRY_VERIFY(replied);
+        replied = false;
+        client.request("firewall", {{"enabled", false}}, [&](const QJsonObject&, const QString& failure) {
+            QVERIFY(failure.isEmpty()); replied = true;
+        });
+        QTRY_VERIFY(replied);
+        QTRY_VERIFY(!service.status().value("firewall").toObject().value("busy").toBool());
+        QVERIFY(service.status().value("firewall").toObject().value("verified").toBool());
+
+        char buffer[4096];
+        while (::read(descriptors[0], buffer, sizeof(buffer)) > 0) {}
+        // Cancel is retried by a timer, without another user command, once
+        // the worker has space. Subsequent cancels never enqueue duplicates.
+        ssize_t received = -1;
+        auto cancellationArrived = [&] {
+            if (received != 1) received = ::read(descriptors[0], &command, 1);
+            return received == 1;
+        };
+        QTRY_VERIFY(cancellationArrived());
+        QCOMPARE(command, char(OC_CMD_CANCEL));
+        for (int i = 0; i < 10000; ++i) session.cancel();
+        QCOMPARE(::read(descriptors[0], &command, 1), ssize_t(-1));
+        QVERIFY(errno == EAGAIN || errno == EWOULDBLOCK);
+    }
+
     void profileTlsCompatibilityIsOptionalAndStoredPerProfile()
     {
         StoredServer profile;
@@ -455,6 +572,52 @@ private slots:
         QVERIFY(loaded.get_tls12_only());
         QVERIFY(loaded.get_legacy_auth());
         StoredServer independent; QVERIFY(!independent.get_tls12_only());
+    }
+
+    void serviceProfileEditorCollectsNoLegacySecretsAndPreservesExistingSettings()
+    {
+        const auto name = QString("Service editor security regression");
+        const auto prefix = "server:" + name + "/";
+        OcSettings settings;
+        settings.setValue(prefix + "server", "https://vpn.example.test");
+        settings.setValue(prefix + "batch", true);
+        settings.setValue(prefix + "password", QByteArray("old-test-password"));
+        settings.setValue(prefix + "token-str", QByteArray("old-test-token"));
+        settings.setValue(prefix + "token-type", int(OC_TOKEN_MODE_TOTP));
+        settings.setValue(prefix + "client-key", QByteArray());
+        settings.setValue(prefix + "proxy", true);
+        settings.setValue(prefix + "vpnc-script", "/test/legacy-script");
+        settings.setValue(prefix + "interface-name", "Legacy adapter");
+        settings.sync();
+        QMap<QString, QVariant> original;
+        for (const auto& key : settings.allKeys())
+            if (key.startsWith(prefix)) original.insert(key, settings.value(key));
+
+        EditDialog dialog(name);
+        dialog.show();
+        QVERIFY(dialog.findChild<QLineEdit*>("tokenEdit")->text().isEmpty());
+        for (const auto& control : {"batchModeBox", "useProxyBox", "tokenEdit", "tokenBox",
+                 "caCertEdit", "caCertButton", "userKeyEdit", "userKeyButton", "userCertEdit",
+                 "userCertButton", "interfaceNameEdit", "vpncScriptEdit", "vpncScriptButton", "loglevelBox"}) {
+            auto widget = dialog.findChild<QWidget*>(control); QVERIFY(widget);
+            QVERIFY(!widget->isEnabled());
+        }
+        dialog.findChild<QLineEdit*>("usernameEdit")->setText("changed-user");
+        dialog.findChild<QCheckBox*>("tls12OnlyBox")->setChecked(true);
+        // Disabled widgets cannot inject unsupported data into a service
+        // profile even if code changes their values programmatically.
+        dialog.findChild<QLineEdit*>("tokenEdit")->setText("must-not-be-saved");
+        dialog.findChild<QLineEdit*>("userKeyEdit")->setText("/test/must-not-be-imported");
+        dialog.findChild<QCheckBox*>("batchModeBox")->setChecked(false);
+        dialog.findChild<QCheckBox*>("useProxyBox")->setChecked(false);
+        QVERIFY(QMetaObject::invokeMethod(&dialog, "on_buttonBox_accepted", Qt::DirectConnection));
+        QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        settings.sync();
+        for (auto value = original.cbegin(); value != original.cend(); ++value)
+            QCOMPARE(settings.value(value.key()), value.value());
+        QCOMPARE(settings.value(prefix + "username").toString(), QString("changed-user"));
+        QVERIFY(settings.value(prefix + "tls12-only").toBool());
+        settings.remove("server:" + name);
     }
 
     void serviceProgressOmitsAuthenticationSecretsAndReachesGuiLog()

@@ -46,6 +46,8 @@ signals:
 protected:
     void run() override;
 private:
+    friend class KillSwitchUiTest;
+    void queueCancelLocked();
     NetworkGuard* m_guard;
     QJsonObject m_profile;
     mutable QMutex m_lock;
@@ -53,7 +55,8 @@ private:
     QString m_challenge, m_answer;
     bool m_answered = false, m_accepted = false;
     std::atomic<bool> m_reportedError{false}, m_connected{false};
-    QTimer m_connectDeadline;
+    QTimer m_connectDeadline, m_cancelRetry;
+    bool m_cancelCommandSent = false, m_statsPending = false;
     QString m_phase = "preparing";
     qintptr m_fd = -1; // SOCKET is pointer-sized on Windows x64.
     std::atomic<bool> m_cancelled{false};

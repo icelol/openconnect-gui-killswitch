@@ -264,13 +264,15 @@ int StoredServer::load(QString& name)
     return rval;
 }
 
-int StoredServer::save()
+int StoredServer::save(bool serviceProfile)
 {
     OcSettings settings;
     settings.beginGroup(PREFIX + this->m_label);
     settings.setValue("server", this->m_server_gateway);
-    settings.setValue("batch", this->m_batch_mode);
-    settings.setValue("proxy", this->m_proxy);
+    if (!serviceProfile) {
+        settings.setValue("batch", this->m_batch_mode);
+        settings.setValue("proxy", this->m_proxy);
+    }
     settings.setValue("disable-udp", this->m_disable_udp);
     settings.setValue("tls12-only", this->m_tls12_only);
     settings.setValue("legacy-auth", this->m_legacy_auth);
@@ -279,38 +281,42 @@ int StoredServer::save()
     settings.setValue("dtls_attempt_period", this->m_dtls_attempt_period);
     settings.setValue("username", this->m_username);
 
-    if (this->m_batch_mode == true) {
+    if (!serviceProfile && this->m_batch_mode == true) {
         settings.setValue("password",
             CryptData::encode(this->m_server_gateway, this->m_password));
         settings.setValue("groupname", this->m_groupname);
     }
 
-    QByteArray data;
-    this->m_ca_cert.data_export(data);
-    settings.setValue("ca-cert", data);
+    if (!serviceProfile) {
+        QByteArray data;
+        this->m_ca_cert.data_export(data);
+        settings.setValue("ca-cert", data);
 
-    this->m_client.cert_export(data);
-    settings.setValue("client-cert", data);
+        this->m_client.cert_export(data);
+        settings.setValue("client-cert", data);
 
-    this->m_client.key_export(data);
-    QString str = QString::fromLatin1(data);
-    settings.setValue("client-key", CryptData::encode(this->m_server_gateway, str));
+        this->m_client.key_export(data);
+        QString str = QString::fromLatin1(data);
+        settings.setValue("client-key", CryptData::encode(this->m_server_gateway, str));
 
-    settings.setValue("server-hash", this->m_server_pin);
-    settings.setValue("server-hash-algo", this->m_server_pin_algo);
+        settings.setValue("server-hash", this->m_server_pin);
+        settings.setValue("server-hash-algo", this->m_server_pin_algo);
 
-    settings.setValue("token-str",
-        CryptData::encode(this->m_server_gateway, this->m_token_string));
-    settings.setValue("token-type", this->m_token_type);
+        settings.setValue("token-str",
+            CryptData::encode(this->m_server_gateway, this->m_token_string));
+        settings.setValue("token-type", this->m_token_type);
+    }
 
     settings.setValue("protocol-name", m_protocol_name);
 
-    settings.setValue("interface-name", m_interface_name);
-    settings.setValue("vpnc-script", m_vpnc_script_filename);
-    if (m_log_level == -1)
-        settings.remove("log-level");
-    else
-        settings.setValue("log-level", m_log_level);
+    if (!serviceProfile) {
+        settings.setValue("interface-name", m_interface_name);
+        settings.setValue("vpnc-script", m_vpnc_script_filename);
+        if (m_log_level == -1)
+            settings.remove("log-level");
+        else
+            settings.setValue("log-level", m_log_level);
+    }
 
     settings.endGroup();
     return 0;

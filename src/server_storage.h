@@ -27,7 +27,8 @@ public:
     ~StoredServer();
 
     int load(QString& name);
-    int save();
+    // Service profiles must not collect or rewrite unsupported legacy secrets.
+    int save(bool serviceProfile = false);
 
     const QString& get_username() const;
     void set_username(const QString& username);

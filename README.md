@@ -164,3 +164,10 @@ end-to-end tested merely because their protocol is listed.
 GPL-2.0-or-later. Based on OpenConnect-GUI 1.6.2. Original author notices and
 third-party license notices are preserved; see [UPSTREAM.md](UPSTREAM.md),
 [AUTHORS](AUTHORS) and [LICENSE.txt](LICENSE.txt).
+
+
+## Kill switch operation and security review / Работа и безопасность
+
+- [Operation, manual OFF and recovery (RU)](docs/killswitch-operation.ru.md).
+- [Network/security audit and improvement plan (RU)](docs/network-security-review.ru.md).
+- [Unreleased fixes / Ещё не выпущенные исправления](docs/unreleased.md).
