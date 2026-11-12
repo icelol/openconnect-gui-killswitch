@@ -11,6 +11,8 @@ python3 "$project_dir/scripts/validate-release.py"
 build_dir="$project_dir/build"
 dist_dir="$project_dir/dist"
 target_version=${OCGUI_DEPLOYMENT_TARGET:-"$(sw_vers -productVersion | cut -d. -f1).0"}
+MACOSX_DEPLOYMENT_TARGET=$target_version
+export MACOSX_DEPLOYMENT_TARGET
 
 for program in cmake ninja macdeployqt brew python3; do
     if ! command -v "$program" >/dev/null 2>&1; then
@@ -20,7 +22,7 @@ for program in cmake ninja macdeployqt brew python3; do
 done
 
 sh "$project_dir/scripts/build-openconnect.sh"
-PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig:$project_dir/build/deps/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export PKG_CONFIG_PATH
 
 cmake -U 'OPENCONNECT_*' -U 'pkgcfg_lib_OPENCONNECT_*' \
