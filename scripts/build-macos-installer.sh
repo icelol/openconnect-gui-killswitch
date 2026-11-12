@@ -34,6 +34,19 @@ cp -X "$project_dir/README.ru.md" "$support/README.ru.md"
 cp -X "$project_dir/VERSION" "$support/VERSION"
 cp -X "$project_dir/scripts/installer/preinstall" "$scripts/preinstall"
 cp -X "$project_dir/scripts/installer/postinstall" "$scripts/postinstall"
+python3 - "$app" "$scripts/requirements.conf" <<'PY'
+import pathlib, plistlib, re, subprocess, sys
+app = pathlib.Path(sys.argv[1])
+with (app / 'Contents/Info.plist').open('rb') as stream:
+    info = plistlib.load(stream)
+minimum = info['LSMinimumSystemVersion']
+assert re.fullmatch(r'[0-9]+(?:\.[0-9]+){0,2}', minimum)
+binary = app / 'Contents/MacOS' / info['CFBundleExecutable']
+archs = subprocess.check_output(['/usr/bin/lipo', '-archs', str(binary)], text=True).split()
+assert archs and set(archs) <= {'arm64', 'x86_64'}
+pathlib.Path(sys.argv[2]).write_text("OCGUI_MINIMUM_MACOS='" + minimum + "'\nOCGUI_PAYLOAD_ARCHS='" + ' '.join(archs) + "'\n")
+PY
+chmod 644 "$scripts/requirements.conf"
 chmod 755 "$scripts/preinstall" "$scripts/postinstall" "$support/recover-killswitch.sh" "$support/clean-macos-all.sh"
 chmod 644 "$payload/Library/LaunchDaemons/"*.plist "$support/"*.plist
 # Never let Installer relocate this bundle to a development/dist copy, and

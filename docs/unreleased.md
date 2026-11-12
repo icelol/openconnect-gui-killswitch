@@ -1,4 +1,4 @@
-# Unreleased / Ещё не выпущено
+# Released in v1.2.2 / Выпущено в v1.2.2
 
 ## Network safety audit — 2026-11-02
 
@@ -13,8 +13,7 @@
 - Add regression tests, a DNS mutation/fuzz target, a Russian operation/recovery
   guide and an audit report with remaining limitations.
 
-These changes do not replace the published v1.2.1 EXE/DMG/PKG.
-The published artifacts retain their original hashes and source tag.
+These fixes are included in v1.2.2. Earlier v1.2.1 files keep their original hashes and source tag.
 
 ## Аудит сетевой безопасности — 02.11.2026
 
@@ -25,4 +24,4 @@ VPN. Редактор больше не предлагает неподдерж�
 [Устройство и ручное отключение](killswitch-operation.ru.md) ·
 [Проверки, ограничения и следующие шаги](network-security-review.ru.md).
 
-Опубликованные установщики v1.2.1 ещё не содержат эти изменения.
+Исправления включены в установщики v1.2.2.

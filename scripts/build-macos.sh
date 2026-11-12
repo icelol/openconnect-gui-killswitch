@@ -11,6 +11,8 @@ python3 "$project_dir/scripts/validate-release.py"
 build_dir="$project_dir/build"
 dist_dir="$project_dir/dist"
 target_version=${OCGUI_DEPLOYMENT_TARGET:-"$(sw_vers -productVersion | cut -d. -f1).0"}
+MACOSX_DEPLOYMENT_TARGET=$target_version
+export MACOSX_DEPLOYMENT_TARGET
 
 for program in cmake ninja macdeployqt brew python3; do
     if ! command -v "$program" >/dev/null 2>&1; then
@@ -20,7 +22,7 @@ for program in cmake ninja macdeployqt brew python3; do
 done
 
 sh "$project_dir/scripts/build-openconnect.sh"
-PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+PKG_CONFIG_PATH="$project_dir/build/deps/openconnect/lib/pkgconfig:$project_dir/build/deps/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export PKG_CONFIG_PATH
 
 cmake -U 'OPENCONNECT_*' -U 'pkgcfg_lib_OPENCONNECT_*' \
@@ -47,7 +49,24 @@ cp -X "$project_dir/docs/third-party/qt-solutions-BSD-3-Clause.txt" "$app/Conten
 cp -X "$project_dir/patches/openconnect-9.21-tls12-policy.patch" "$app/Contents/Resources/licenses/"
 cp -X "$project_dir/patches/openconnect-9.21-ucrt.patch" "$app/Contents/Resources/licenses/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $release_version" "$app/Contents/Info.plist"
-macdeployqt "$app" -verbose=1 -libpath="$(brew --prefix qtsvg)/lib"
+macdeployqt "$app" -no-codesign -verbose=1 -libpath="$(brew --prefix qtsvg)/lib"
+if [ -n "${OCGUI_LZ4_PREFIX:-}" ]; then
+    # Qt may copy an opt-identity keg without rewriting the explicitly pinned
+    # load command. Confirm the copied UUID before making that command relative.
+    python3 - "$OCGUI_LZ4_PREFIX/lib/liblz4.1.dylib" "$app" <<'PYLZ4'
+import pathlib, re, subprocess, sys
+original = pathlib.Path(sys.argv[1])
+app = pathlib.Path(sys.argv[2])
+def uuids(path):
+    value = subprocess.check_output(['/usr/bin/otool', '-l', str(path)], text=True)
+    return set(re.findall(r'\buuid\s+([0-9A-Fa-f-]{36})', value))
+assert uuids(original) and uuids(original) == uuids(app / 'Contents/Frameworks/liblz4.1.dylib'), 'Wrong LZ4 input copied'
+subprocess.run(['/usr/bin/install_name_tool', '-change', str(original), '@loader_path/liblz4.1.dylib',
+    str(app / 'Contents/Frameworks/libopenconnect.5.dylib')], check=True)
+PYLZ4
+fi
+# Remove build-host search paths and provide the packaged dependency root.
+python3 "$project_dir/scripts/relocate-macos-bundle.py" "$app"
 python3 "$project_dir/scripts/package-macos-dependencies.py" "$app"
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict "$app"

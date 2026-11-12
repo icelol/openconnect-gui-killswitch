@@ -47,9 +47,21 @@ for folder, directories, files in os.walk(cellar):
                     index[name].add(path)
 components = {}
 file_map = []
+uuid_cache = {}
+def uuids(path):
+    path = path.resolve()
+    if path not in uuid_cache:
+        value = subprocess.check_output(['/usr/bin/otool', '-l', str(path)], text=True)
+        uuid_cache[path] = set(re.findall(r'\buuid\s+([0-9A-Fa-f-]{36})', value))
+    return uuid_cache[path]
+
 for path in native:
     candidates = index[path.name]
-    # Prefer the active keg, not an older installed version of the same formula.
+    # Deployment rewrites paths/signatures but preserves LC_UUID. Match the
+    # actual input before preferring an active keg: a compatibility build can
+    # deliberately link an older installed ABI-compatible library.
+    deployed = uuids(path)
+    candidates = {p for p in candidates if deployed and deployed <= uuids(p)}
     active = {p for p in candidates if (cellar.parent / 'opt' / p.relative_to(cellar).parts[0]).resolve()
               == cellar / Path(*p.relative_to(cellar).parts[:2])}
     if active:

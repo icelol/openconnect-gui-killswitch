@@ -2,9 +2,24 @@
 set -eu
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
+stage=initialization
+report_failure() {
+    result=$?
+    if [ "$result" -ne 0 ]; then
+        printf 'OPENCONNECT_INSTALL_FAILED stage=%s exit=%s\n' "$stage" "$result" >&2
+    fi
+}
+trap report_failure EXIT
+run_step() {
+    stage=$1
+    shift
+    printf 'OPENCONNECT_INSTALL_STEP=%s\n' "$stage"
+    "$@"
+}
 binary='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/MacOS/OpenConnect-GUI-KillSwitch'
 support='/Library/Application Support/OpenConnect-GUI-KillSwitch'
 daemon='/Library/LaunchDaemons/net.openconnect-vpn.killswitch.service.plist'
+stage=desktop-account
 desktop_uid=$(/usr/bin/stat -f '%u' /dev/console)
 if [ "$desktop_uid" -lt 500 ]; then
     printf '%s\n' 'Install from the logged-in macOS desktop account.' >&2
@@ -19,6 +34,7 @@ if [ -L "$desktop_home/Library" ] || [ -L "$agent_dir" ] || [ -L "$agent" ]; the
 fi
 # Verify the exact runtime at launchd's path before invoking any privileged
 # diagnostic. A relocated v6 must never cause us to execute the old v5 helper.
+stage=runtime-identity
 runtime_info='/Library/PrivilegedHelperTools/OpenConnect-KillSwitch/Runtime.app/Contents/Info.plist'
 runtime_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runtime_info")
 runtime_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$runtime_info")
@@ -27,27 +43,37 @@ if [ "$runtime_id" != net.openconnect-vpn.gui.killswitch.boot ] || [ "$runtime_v
     printf '%s\n' 'Wrong helper at the fixed service path; installation cannot continue.' >&2
     exit 1
 fi
-"$binary" --check-tun
-"$binary" --check-storage
-"$binary" --check-pf-abi
-"$binary" --prepare-boot
+run_step tunnel-allocation "$binary" --check-tun
+run_step protected-storage "$binary" --check-storage
+run_step pf-abi "$binary" --check-pf-abi
+if ! run_step boot-configuration "$binary" --prepare-boot; then
+    # Keep malformed existing intent for the service's recovery controls.
+    # Do not silently turn an unknown ON policy into OFF during installation.
+    if [ -f "$support/boot.json" ] && [ ! -L "$support/boot.json" ]; then
+        printf '%s\n' 'WARNING: existing boot configuration needs recovery; starting authenticated OFF controls without changing saved intent.' >&2
+    else
+        exit 1
+    fi
+fi
 
 # Root-owned identity policy; VPN endpoints come from the user's profiles.
+stage=service-configuration
 /usr/bin/printf '{"schema":2,"uid":%s}\n' "$desktop_uid" > "$support/service.json"
 /bin/chmod 600 "$support/service.json"
 /usr/sbin/chown root:wheel "$support/service.json"
 
 # v5 ran the GUI as root. Move only this application's preferences, without
 # printing credentials. Newer profile values take precedence.
-"$binary" --migrate-preferences "$desktop_uid"
+run_step preferences-migration "$binary" --migrate-preferences "$desktop_uid"
 
 /bin/rm -f /Library/LaunchDaemons/net.openconnect-vpn.killswitch.boot.plist
 # Bootstrap the standard root hook only when PF is empty, as in earlier builds.
 # A restore failure must leave OFF controls available instead of aborting install.
-if ! "$binary" --boot-guard; then
+if ! run_step firewall-restoration "$binary" --boot-guard; then
     printf '%s\n' 'Firewall restoration needs attention; continuing to start authenticated OFF controls.' >&2
 fi
-/bin/launchctl bootstrap system "$daemon"
+run_step service-bootstrap /bin/launchctl bootstrap system "$daemon"
+stage=service-readiness
 ready=false
 for attempt in 1 2 3 4 5 6 7 8; do
     if "$binary" --service-ready; then ready=true; break; fi
@@ -68,6 +94,7 @@ if [ -d "$misplaced" ] && [ ! -L "$misplaced" ]; then
         /bin/rm -rf -- "$misplaced"
     fi
 fi
+stage=login-agent
 if [ ! -d "$agent_dir" ]; then /usr/bin/install -d -m 755 -o "$desktop_uid" "$agent_dir"; fi
 /usr/bin/install -m 644 -o "$desktop_uid" "$support/net.openconnect-vpn.killswitch.gui.plist" "$agent"
 /bin/launchctl bootout "gui/$desktop_uid/net.openconnect-vpn.killswitch.gui" 2>/dev/null || :

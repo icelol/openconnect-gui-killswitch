@@ -30,3 +30,9 @@ organization-specific profiles never belong in source, installers or reports.
 локальные `RELEASE-MANIFEST.json` и `SHA256SUMS`; публикаций и чтения токенов в нём
 нет. После публикации заново скачайте файлы и проверьте хеши, тег и исходники.
 Уже опубликованные файлы старых релизов сохраняются.
+
+For a macOS compatibility build, set `OCGUI_DEPLOYMENT_TARGET` explicitly. If an
+active Homebrew library has a higher minimum OS, use a compatible installed keg
+with `OCGUI_LZ4_PREFIX` when applicable, or build on the minimum supported OS.
+The package audit must pass; do not lower Info.plist without rebuilding or selecting
+compatible binaries. The source inventory identifies actual Mach-O inputs by UUID.

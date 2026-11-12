@@ -22,6 +22,10 @@ for path in app.rglob("*"):
         if file.read(4) not in magic:
             continue
     count += 1
+    load_commands = subprocess.check_output(['/usr/bin/otool', '-l', str(path)], text=True)
+    for runpath in re.findall(r'cmd LC_RPATH\s+cmdsize \d+\s+path (.+?) \(offset', load_commands):
+        if runpath.startswith('/') and not runpath.startswith(('/System/', '/usr/lib/')):
+            failures.append(f"{path.relative_to(app)}: external runpath {runpath}")
     output = subprocess.check_output(["/usr/bin/otool", "-L", str(path)], text=True)
     identifiers = subprocess.check_output(["/usr/bin/otool", "-D", str(path)], text=True).splitlines()[1:]
     own_ids = {line.strip() for line in identifiers}
