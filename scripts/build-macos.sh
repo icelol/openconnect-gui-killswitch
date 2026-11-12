@@ -61,7 +61,7 @@ def uuids(path):
     value = subprocess.check_output(['/usr/bin/otool', '-l', str(path)], text=True)
     return set(re.findall(r'\buuid\s+([0-9A-Fa-f-]{36})', value))
 assert uuids(original) and uuids(original) == uuids(app / 'Contents/Frameworks/liblz4.1.dylib'), 'Wrong LZ4 input copied'
-subprocess.run(['/usr/bin/install_name_tool', '-change', str(original), '@rpath/liblz4.1.dylib',
+subprocess.run(['/usr/bin/install_name_tool', '-change', str(original), '@loader_path/liblz4.1.dylib',
     str(app / 'Contents/Frameworks/libopenconnect.5.dylib')], check=True)
 PYLZ4
 fi
