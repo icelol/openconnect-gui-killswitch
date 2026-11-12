@@ -12,7 +12,7 @@ mkdir -p "$deps/source"
 patch_hash=$(shasum -a 256 "$patch_file" | cut -d ' ' -f 1)
 ucrt_patch="$project_dir/patches/openconnect-9.21-ucrt.patch"
 patch_hash="$patch_hash:$(shasum -a 256 "$ucrt_patch" | cut -d ' ' -f 1)"
-stamp="$expected:$patch_hash:$(uname -s):${MACOSX_DEPLOYMENT_TARGET:-}:${OCGUI_LZ4_PREFIX:-}"
+stamp="$expected:$patch_hash:$(uname -s):${MACOSX_DEPLOYMENT_TARGET:-}:${OCGUI_LZ4_PREFIX:-}:lz4-identity-v1"
 if [ -f "$prefix/ocgui-build-stamp" ] && [ -f "$prefix/include/openconnect.h" ] \
     && [ "$(cat "$prefix/ocgui-build-stamp")" = "$stamp" ]; then
     printf '%s\n' 'Pinned OpenConnect + TLS compatibility API is ready.'
@@ -54,4 +54,12 @@ cd "$source"
     CFLAGS="-O2 -ffile-prefix-map=$source=."
 make -j 6 libopenconnect.la
 make install-libLTLIBRARIES install-includeHEADERS install-pkgconfigDATA
+if [ "$(uname -s)" = Darwin ] && [ -n "${OCGUI_LZ4_PREFIX:-}" ]; then
+    # Homebrew kegs retain an opt install name. Pin the explicit compatible input
+    # so macdeployqt cannot silently substitute the active, newer opt keg.
+    lz4_library="$OCGUI_LZ4_PREFIX/lib/liblz4.1.dylib"
+    lz4_identity=$(/usr/bin/otool -D "$lz4_library" | /usr/bin/sed -n '2p')
+    [ -n "$lz4_identity" ] || { echo 'Missing LZ4 install name' >&2; exit 1; }
+    /usr/bin/install_name_tool -change "$lz4_identity" "$lz4_library" "$prefix/lib/libopenconnect.5.dylib"
+fi
 printf '%s\n' "$stamp" > "$prefix/ocgui-build-stamp"

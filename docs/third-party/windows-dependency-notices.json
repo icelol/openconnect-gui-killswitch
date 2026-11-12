@@ -135,13 +135,13 @@
     },
     {
       "package": "lz4",
-      "upstream_version": "1.10.0",
-      "upstream_tag": "v1.10.0",
-      "upstream_source": "https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/LICENSE",
+      "upstream_version": "1.11.1",
+      "upstream_tag": "v1.11.1",
+      "upstream_source": "https://raw.githubusercontent.com/lz4/lz4/v1.11.1/lib/LICENSE",
       "notices": [
         {
-          "file": "lz4-1.10.0-LICENSE.txt",
-          "url": "https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/LICENSE",
+          "file": "lz4-1.11.1-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/lz4/lz4/v1.11.1/lib/LICENSE",
           "sha256": "8b58c446121a109ccf32edc094bba3010a3d85e4ee3702950db55e4d3e87736c"
         }
       ]
