@@ -65,6 +65,8 @@ subprocess.run(['/usr/bin/install_name_tool', '-change', str(original), '@loader
     str(app / 'Contents/Frameworks/libopenconnect.5.dylib')], check=True)
 PYLZ4
 fi
+# Remove build-host search paths and provide the packaged dependency root.
+python3 "$project_dir/scripts/relocate-macos-bundle.py" "$app"
 python3 "$project_dir/scripts/package-macos-dependencies.py" "$app"
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict "$app"
