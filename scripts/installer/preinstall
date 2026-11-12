@@ -3,6 +3,30 @@ set -eu
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 
+# Requirements are generated from the actual payload by the package builder.
+# Reject unsupported Macs before stopping a working installed client.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ ! -f "$script_dir/requirements.conf" ]; then
+    printf '%s\n' 'OPENCONNECT_INSTALL_FAILED stage=preflight: package requirements are missing.' >&2
+    exit 1
+fi
+. "$script_dir/requirements.conf"
+actual_os=$(/usr/bin/sw_vers -productVersion)
+actual_arch=$(/usr/bin/uname -m)
+case " $OCGUI_PAYLOAD_ARCHS " in
+    *" $actual_arch "*) ;;
+    *) printf 'OPENCONNECT_INSTALL_FAILED stage=preflight: requires %s; this Mac reports %s. Existing installation was not stopped.\n' "$OCGUI_PAYLOAD_ARCHS" "$actual_arch" >&2; exit 1 ;;
+esac
+if ! /usr/bin/awk -v actual="$actual_os" -v required="$OCGUI_MINIMUM_MACOS" 'BEGIN {
+    split(actual,a,"."); split(required,r,".");
+    for(i=1;i<=3;i++) { if(a[i]+0>r[i]+0) exit 0; if(a[i]+0<r[i]+0) exit 1; }
+    exit 0;
+}'; then
+    printf 'OPENCONNECT_INSTALL_FAILED stage=preflight: macOS %s or later is required; this Mac has %s. Existing installation was not stopped.\n' "$OCGUI_MINIMUM_MACOS" "$actual_os" >&2
+    exit 1
+fi
+printf 'OPENCONNECT_INSTALL_PREFLIGHT os=%s arch=%s required_os=%s payload_archs=%s\n' "$actual_os" "$actual_arch" "$OCGUI_MINIMUM_MACOS" "$OCGUI_PAYLOAD_ARCHS"
+
 # A running older GUI must not overwrite the new shared firewall state.
 # Updating this app closes its VPN session, retaining its PF block rules.
 /bin/launchctl bootout system/net.openconnect-vpn.killswitch.boot 2>/dev/null || :

@@ -1,14 +1,14 @@
 # OpenConnect GUI + Kill Switch
 
-**Stable release 1.2.1 — Windows x64 and macOS Apple Silicon.**
+**Stable release 1.2.2 — Windows x64 and macOS Apple Silicon.**
 A system-wide kill switch with independent Connect/Disconnect controls.
 
 | Platform | Download | Guide |
 | --- | --- | --- |
-| Windows x64 | [Setup EXE](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-Setup-windows-x64-v1.2.1.exe) | [EN](docs/windows.md) · [RU](docs/windows.ru.md) |
-| macOS Apple Silicon, 27+ | [DMG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-arm64-v1.2.1.dmg) · [PKG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.1/OpenConnect-GUI-KillSwitch-Setup-arm64-v1.2.1.pkg) | [EN/RU](docs/macos-killswitch.md) |
+| Windows x64 | [Setup EXE](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.2/OpenConnect-GUI-KillSwitch-Setup-windows-x64-v1.2.2.exe) | [EN](docs/windows.md) · [RU](docs/windows.ru.md) |
+| macOS Apple Silicon, 27+ | [DMG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.2/OpenConnect-GUI-KillSwitch-arm64-v1.2.2.dmg) · [PKG](https://github.com/icelol/openconnect-gui-killswitch/releases/download/v1.2.2/OpenConnect-GUI-KillSwitch-Setup-arm64-v1.2.2.pkg) | [EN/RU](docs/macos-killswitch.md) |
 
-[All release files, source and SHA-256](https://github.com/icelol/openconnect-gui-killswitch/releases/tag/v1.2.1).
+[All release files, source and SHA-256](https://github.com/icelol/openconnect-gui-killswitch/releases/tag/v1.2.2).
 Before updating or removing on Windows, choose **Quit** in the tray menu; the window close button may only minimize it.
 
 **Service health is visible in the GUI.** Authenticated status is checked every
