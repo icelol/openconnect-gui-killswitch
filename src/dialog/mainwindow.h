@@ -130,6 +130,7 @@ private:
     void initializeNetworkClient(NetworkClient* client);
     void applyServiceStatus(const QJsonObject& status);
     void updateServiceIndicator();
+    void refreshConnectAvailability();
     void showServiceDiagnostics();
     void gotLatestVersion(QNetworkReply *reply);
     void checkLatestVersion() const;

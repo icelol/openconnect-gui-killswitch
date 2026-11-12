@@ -1,3 +1,16 @@
+# Unreleased / Не выпущено
+
+Typing a gateway into Server with no saved profiles now enables Connect and opens
+quick setup. A profile created there becomes the selected item, so retry uses it
+without another setup dialog. Empty input and preview remain disabled;
+Cancel/Disconnect continue to use the service state.
+
+На первом запуске ввод адреса в Server теперь включает Connect. Созданный через
+быстрое подключение профиль выбирается в списке и повторно используется при
+следующей попытке. Исправление проверено двумя регрессионными сценариями; это
+отдельно воспроизведённая ошибка, а не подтверждение причины каждого отказа
+подключения на другом Mac. Стабильные файлы 1.2.2 не заменялись.
+
 # Released in v1.2.2 / Выпущено в v1.2.2
 
 ## Network safety audit — 2026-11-02

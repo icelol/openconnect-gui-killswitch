@@ -5,6 +5,7 @@
 #include "dialog/mainwindow.h"
 #include "dialog/MyInputDialog.h"
 #include "dialog/editdialog.h"
+#include "dialog/NewProfileDialog.h"
 #include "FileLogger.h"
 #include "server_storage.h"
 #include "VpnProgress.h"
@@ -170,6 +171,96 @@ private slots:
         });
         QTRY_VERIFY(input.isFinished());
         QVERIFY(!input.result());
+    }
+
+    void typedGatewayCanConnectWhenThereAreNoSavedProfiles()
+    {
+        OcSettings settings;
+        QMap<QString, QVariant> original;
+        for (const auto& key : settings.allKeys()) original.insert(key, settings.value(key));
+        const auto restore = qScopeGuard([&] {
+            settings.clear();
+            for (auto it = original.cbegin(); it != original.cend(); ++it) settings.setValue(it.key(), it.value());
+            settings.sync();
+        });
+        settings.clear(); settings.sync();
+        QTemporaryDir directory; Firewall pf;
+        MainWindow window(nullptr, false, {}, new NetworkGuard(std::ref(pf), directory.filePath("state.json")));
+        window.show();
+        auto profiles = window.findChild<QComboBox*>("serverList");
+        auto button = window.findChild<QPushButton*>("connectionButton");
+        QTRY_COMPARE(profiles->count(), 0);
+        QTest::qWait(100); // Let the initial no-profile state enter.
+        QVERIFY(!button->isEnabled());
+        profiles->setEditText("https://vpn.example.test");
+        QCOMPARE(profiles->currentIndex(), -1);
+        QTRY_VERIFY2(button->isEnabled(), "A typed gateway must enable Connect on a fresh installation");
+        bool dialogOpened = false;
+        QTimer dismiss;
+        connect(&dismiss, &QTimer::timeout, &window, [&] {
+            if (auto dialog = window.findChild<NewProfileDialog*>()) {
+                dialogOpened = true; dismiss.stop(); dialog->reject();
+            }
+        });
+        dismiss.start(10);
+        button->click();
+        QTRY_VERIFY(dialogOpened);
+        QVERIFY(button->isEnabled());
+        profiles->clearEditText();
+        QTRY_VERIFY(!button->isEnabled());
+        QVERIFY(pf.installed.isEmpty());
+    }
+
+    void quickConnectSelectsTheNewProfileAndRetriesWithoutAnotherSetupDialog()
+    {
+        OcSettings settings;
+        QMap<QString, QVariant> original;
+        for (const auto& key : settings.allKeys()) original.insert(key, settings.value(key));
+        const auto restore = qScopeGuard([&] {
+            settings.clear();
+            for (auto it = original.cbegin(); it != original.cend(); ++it) settings.setValue(it.key(), it.value());
+            settings.sync();
+        });
+        settings.clear(); settings.sync();
+        QTemporaryDir directory; Firewall pf; QString error;
+        NetworkGuard guard(std::ref(pf), directory.filePath("state.json")); guard.requestEnabled(false);
+        const auto socket = directory.filePath("control.sock");
+        NetworkService service(&guard, getuid(), socket);
+        QVERIFY(service.start(error)); service.m_monitor.stop();
+        service.m_busy = true; // Exercise the real IPC request without starting a network worker.
+        auto client = new NetworkClient(nullptr, socket, getuid());
+        MainWindow window(nullptr, false, {}, nullptr, client); window.show();
+        auto profiles = window.findChild<QComboBox*>("serverList");
+        auto button = window.findChild<QPushButton*>("connectionButton");
+        QTRY_VERIFY(client->available());
+        QTRY_COMPARE(window.m_remoteVpnState, int(STATUS_DISCONNECTED));
+        QTest::qWait(100);
+        profiles->setEditText("https://vpn.example.test");
+        QTRY_VERIFY(button->isEnabled());
+        QString savedName;
+        QTimer accept;
+        connect(&accept, &QTimer::timeout, &window, [&] {
+            if (auto dialog = window.findChild<NewProfileDialog*>()) {
+                savedName = dialog->getNewProfileName(); accept.stop();
+                QMetaObject::invokeMethod(dialog, "on_buttonBox_accepted", Qt::DirectConnection);
+            }
+        });
+        accept.start(10); button->click();
+        QTRY_VERIFY(!service.m_pendingProfile.isEmpty());
+        QVERIFY(!savedName.isEmpty());
+        QCOMPARE(profiles->count(), 1);
+        QCOMPARE(profiles->currentText(), savedName);
+        QCOMPARE(service.m_pendingProfile.value("gateway").toString(), QString("https://vpn.example.test"));
+        QCOMPARE(service.m_pendingProfile.value("protocol").toString(), QString("anyconnect"));
+        QTRY_COMPARE(button->text(), QString("Cancel"));
+        button->click();
+        QTRY_COMPARE(button->text(), QString("Connect"));
+        button->click();
+        QTRY_VERIFY(!service.m_pendingProfile.isEmpty());
+        QVERIFY(!window.findChild<NewProfileDialog*>());
+        button->click();
+        QTRY_VERIFY(service.m_pendingProfile.isEmpty());
+        QVERIFY(pf.installed.isEmpty());
     }
 
     void firstConnectAndRetrySendOneCommandWithoutDuplicateSessionError()

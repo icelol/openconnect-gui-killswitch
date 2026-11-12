@@ -237,6 +237,8 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     connect(timer, &QTimer::timeout,
         this, &MainWindow::request_update_stats,
         Qt::QueuedConnection);
+    connect(ui->serverList->lineEdit(), &QLineEdit::textChanged,
+        this, &MainWindow::refreshConnectAvailability);
     connect(ui->serverList->lineEdit(), &QLineEdit::returnPressed,
         this, &MainWindow::on_connectClicked,
         Qt::QueuedConnection);
@@ -273,7 +275,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     // TODO: initial state machine
     QStateMachine* machine = new QStateMachine(this);
     QState* s1_noProfiles = new QState();
-    s1_noProfiles->assignProperty(ui->connectionButton, "enabled", false);
+    connect(s1_noProfiles, &QState::entered, this, &MainWindow::refreshConnectAvailability);
     s1_noProfiles->assignProperty(ui->serverList, "enabled", true);
     s1_noProfiles->assignProperty(ui->actionEditSelectedProfile, "enabled", false);
     s1_noProfiles->assignProperty(ui->actionRemoveSelectedProfile, "enabled", false);
@@ -286,7 +288,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName,
     machine->addState(s1_noProfiles);
 
     QState* s2_connectionReady = new QState();
-    s2_connectionReady->assignProperty(ui->connectionButton, "enabled", !qApp->property("previewMode").toBool());
+    connect(s2_connectionReady, &QState::entered, this, &MainWindow::refreshConnectAvailability);
     s2_connectionReady->assignProperty(ui->serverList, "enabled", true);
     s2_connectionReady->assignProperty(ui->actionEditSelectedProfile, "enabled", true);
     s2_connectionReady->assignProperty(ui->actionRemoveSelectedProfile, "enabled", true);
@@ -919,6 +921,20 @@ void MainWindow::blink_ui()
     ++t;
 }
 
+void MainWindow::refreshConnectAvailability()
+{
+    // An editable gateway is a valid quick-connect entry even when the combo
+    // has no saved item/current index. Do not disturb Cancel/Disconnect while
+    // a service session or local worker is active.
+    if (m_networkClient && (m_connectRequestPending || m_remoteVpnState == STATUS_CONNECTING
+            || m_remoteVpnState == STATUS_CONNECTED || m_remoteVpnState == STATUS_DISCONNECTING))
+        return;
+    if (!m_networkClient && (cmd_fd != INVALID_SOCKET || futureWatcher.isRunning()))
+        return;
+    ui->connectionButton->setEnabled(!qApp->property("previewMode").toBool()
+        && !ui->serverList->currentText().trimmed().isEmpty());
+}
+
 void MainWindow::changeStatus(int val)
 {
     if (val == STATUS_CONNECTED) {
@@ -1039,6 +1055,7 @@ void MainWindow::changeStatus(int val)
             this, &MainWindow::on_connectClicked,
             Qt::ConnectionType(Qt::QueuedConnection | Qt::UniqueConnection));
 
+        refreshConnectAvailability();
         emit readyToShutdown();
     } else if (val == STATUS_DISCONNECTING) {
         ui->iconLabel->setPixmap(CONNECTING_ICON);
@@ -1176,7 +1193,7 @@ void MainWindow::on_connectClicked()
         return;
     }
 
-    if (ui->serverList->currentText().isEmpty()) {
+    if (ui->serverList->currentText().trimmed().isEmpty()) {
         QMessageBox::information(this,
             qApp->applicationName(),
             tr("You need to specify a gateway. e.g. vpn.example.com:443"));
@@ -1213,6 +1230,15 @@ void MainWindow::on_connectClicked()
             //dialog saves the host, so we load again
             name = dialog.getNewProfileName();
             ss->load(name);
+            // Select the profile just saved by quick connect, including the
+            // first profile on a fresh installation. setItemText(-1) cannot
+            // add a missing combo item and would prompt again on each retry.
+            int index = ui->serverList->findText(name);
+            if (index < 0) {
+                ui->serverList->addItem(name);
+                index = ui->serverList->count() - 1;
+            }
+            ui->serverList->setCurrentIndex(index);
         }
 
         if (name.compare(ui->serverList->currentText()) != 0) {
